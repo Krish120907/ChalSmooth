@@ -1,0 +1,56 @@
+# Python virtual environments
+venv/
+env/
+.venv/
+.env/
+ml/venv/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# pip
+pip-log.txt
+pip-delete-this-directory.txt
+requirements.txt
+requirements-*.txt
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# Type checking
+.mypy_cache/
+.pyre/
+.pytype/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# TensorFlow / Keras models
+*.hdf5
+*.h5
+*.keras
+*.pb
+*.tflite
+*.ckpt
+*.ckpt.*
