@@ -1,0 +1,8 @@
+{
+  "label_to_name": {
+    "0": "pothole",
+    "1": "speed_bump",
+    "2": "uneven_road",
+    "3": "normal"
+  }
+}
