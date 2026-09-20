@@ -2,13 +2,7 @@
   "label_to_name": {
     "0": "pothole",
     "1": "speed_bump",
-    "2": "uneven_road"
-  },
-  "original_type_to_label": {
-    "Pothole": 0,
-    "Speed_bump": 1,
-    "Metal_bumps": 2,
-    "Ditch": 2,
-    "Manhole_cover": 2
+    "2": "uneven_road",
+    "3": "normal"
   }
 }
