@@ -52,5 +52,7 @@ Thumbs.db
 *.keras
 *.pb
 *.tflite
+# ...except the on-device model shipped inside the Android app
+!android/app/src/main/assets/model.tflite
 *.ckpt
 *.ckpt.*
