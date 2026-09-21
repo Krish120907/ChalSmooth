@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 <resources>
     <style name="Theme.RoadClassifier" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="colorPrimary">@color/purple_500</item>
@@ -11,3 +12,12 @@
         <item name="colorOnSurface">@color/text_primary</item>
     </style>
 </resources>
+=======
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.ChalSmooth" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#080C16</item>
+        <item name="android:navigationBarColor">#080C16</item>
+    </style>
+</resources>
+>>>>>>> 998d5ff (error1)

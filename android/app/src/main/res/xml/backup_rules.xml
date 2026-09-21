@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
+<<<<<<< HEAD
     <exclude domain="sharedpref" path="."/>
 </full-backup-content>
+=======
+    <include domain="sharedpref" path="."/>
+</full-backup-content>
+>>>>>>> 998d5ff (error1)

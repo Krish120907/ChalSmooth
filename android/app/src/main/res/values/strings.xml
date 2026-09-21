@@ -1,4 +1,5 @@
 <resources>
+<<<<<<< HEAD
     <string name="app_name">Road Classifier</string>
     <string name="start_detection">Start Detection</string>
     <string name="stop_detection">Stop Detection</string>
@@ -16,3 +17,7 @@
     <string name="collecting_data">Collecting data...</string>
     <string name="processing">Processing...</string>
 </resources>
+=======
+    <string name="app_name">ChalSmooth</string>
+</resources>
+>>>>>>> 998d5ff (error1)

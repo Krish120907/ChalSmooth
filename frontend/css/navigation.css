@@ -1,0 +1,306 @@
+/* =========================================================
+   Navigation, Comfort Slider & Hazard Alerts (Parameters 15, 16)
+   ========================================================= */
+
+.navigation-view-layout {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  overflow: hidden;
+}
+
+#nav-map {
+  flex: 1;
+  height: 100%;
+  background: #080c16;
+}
+
+/* Floating Navigation Control Panel (Bottom Sheet / Left Dock) */
+.nav-control-panel {
+  position: absolute;
+  bottom: 24px;
+  left: 24px;
+  width: 440px;
+  max-width: calc(100vw - 48px);
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  gap: 16px;
+}
+
+/* Preset Route Selector */
+.route-selector-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.route-selector-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.route-select-dropdown {
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  padding: 9px 12px;
+  color: var(--text-primary);
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 13.5px;
+  outline: none;
+  cursor: pointer;
+}
+
+/* Metrics Row: ETA & Comfort Index */
+.nav-metrics-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.nav-metric-card {
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-metric-val {
+  font-family: var(--font-heading);
+  font-size: 24px;
+  font-weight: 800;
+  color: #fff;
+  line-height: 1.1;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.nav-metric-unit {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.nav-metric-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+/* Trade-Off Delta Chip (Flagship Feature from README) */
+.tradeoff-delta-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(6, 182, 212, 0.15));
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: var(--radius-md);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #34d399;
+}
+
+.delta-badge {
+  background: rgba(16, 185, 129, 0.25);
+  color: #10b981;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* Lagrangian Comfort Slider (Lambda-Sweep) */
+.comfort-slider-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.slider-labels-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.label-fastest {
+  color: var(--accent-amber);
+}
+
+.label-smoothest {
+  color: var(--accent-smooth);
+}
+
+.comfort-range-slider {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(90deg, #f59e0b 0%, #38bdf8 50%, #10b981 100%);
+  outline: none;
+  cursor: pointer;
+}
+
+.comfort-range-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid #10b981;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.8);
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.comfort-range-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+
+/* Navigation Action Buttons */
+.nav-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn-start-nav {
+  flex: 1;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #fff;
+  border: none;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: var(--shadow-glow-smooth);
+  transition: var(--trans-base);
+}
+
+.btn-start-nav:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 25px rgba(16, 185, 129, 0.5);
+}
+
+.btn-start-nav.navigating {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  box-shadow: var(--shadow-glow-red);
+}
+
+/* Turn-by-Turn Instruction Banner (Top Center) */
+.tbt-instruction-banner {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  width: 90%;
+  max-width: 520px;
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-xl);
+  padding: 14px 20px;
+  display: none;
+  align-items: center;
+  gap: 16px;
+  box-shadow: var(--shadow-lg);
+  animation: slideDown 0.3s ease-out;
+}
+
+.tbt-instruction-banner.active {
+  display: flex;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translate(-50%, -20px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+.tbt-icon-bubble {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--accent-cyan);
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.tbt-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.tbt-distance {
+  font-family: var(--font-heading);
+  font-size: 20px;
+  font-weight: 800;
+  color: #fff;
+  line-height: 1;
+}
+
+.tbt-instruction {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+/* Hazard Proximity Alert Toast in Nav (Parameter 16) */
+.hazard-proximity-alert {
+  position: absolute;
+  top: 96px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  width: 90%;
+  max-width: 480px;
+  background: rgba(30, 10, 18, 0.95);
+  backdrop-filter: blur(16px);
+  border: 1.5px solid var(--accent-red);
+  border-radius: var(--radius-lg);
+  padding: 12px 18px;
+  display: none;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 0 25px rgba(239, 68, 68, 0.4);
+  animation: pulseHazard 1.5s infinite;
+}
+
+.hazard-proximity-alert.active {
+  display: flex;
+}
+
+@keyframes pulseHazard {
+  0%, 100% { box-shadow: 0 0 15px rgba(239, 68, 68, 0.3); }
+  50% { box-shadow: 0 0 30px rgba(239, 68, 68, 0.6); }
+}
