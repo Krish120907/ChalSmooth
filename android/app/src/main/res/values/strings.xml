@@ -1,6 +1,5 @@
 <resources>
-<<<<<<< HEAD
-    <string name="app_name">Road Classifier</string>
+    <string name="app_name">ChalSmooth</string>
     <string name="start_detection">Start Detection</string>
     <string name="stop_detection">Stop Detection</string>
     <string name="detection_status">Detection Status</string>
@@ -16,8 +15,26 @@
     <string name="waiting_for_data">Waiting for sensor data...</string>
     <string name="collecting_data">Collecting data...</string>
     <string name="processing">Processing...</string>
+
+    <!-- Map UI Strings -->
+    <string name="current_location">Current Location</string>
+    <string name="use_gps">Use GPS</string>
+    <string name="search_destination">Search destination</string>
+    <string name="clear">Clear</string>
+    <string name="destination">Destination</string>
+    <string name="route_options">Route Options</string>
+    <string name="start_navigation">Start Navigation</string>
+    <string name="center_on_location">Center on Location</string>
+    <string name="map_layers">Map Layers</string>
+    <string name="no_routes_found">No routes found</string>
+    <string name="calculating_routes">Calculating routes...</string>
+    <string name="route_calculated">Route calculated</string>
+    <string name="select_destination">Select a destination to see routes</string>
+    <string name="location_permission_required">Location permission required</string>
+    <string name="permission_denied">Permission denied</string>
+    <string name="searching">Searching...</string>
+    <string name="no_results_found">No results found</string>
+    <string name="recommended">Recommended</string>
+    <string name="fastest">Fastest</string>
+    <string name="shortest">Shortest</string>
 </resources>
-=======
-    <string name="app_name">ChalSmooth</string>
-</resources>
->>>>>>> 998d5ff (error1)

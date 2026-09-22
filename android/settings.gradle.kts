@@ -3,6 +3,7 @@ pluginManagement {
         google()
         mavenCentral()
         gradlePluginPortal()
+        maven(url = uri("https://maven.mappls.com/repository/mappls/"))
     }
 }
 dependencyResolutionManagement {
@@ -10,6 +11,7 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven(url = uri("https://maven.mappls.com/repository/mappls/"))
     }
 }
 rootProject.name = "RoadClassifier"

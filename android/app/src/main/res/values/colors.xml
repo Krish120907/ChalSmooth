@@ -16,4 +16,5 @@
     <color name="card_background">#FFFFFFFF</color>
     <color name="text_primary">#FF212121</color>
     <color name="text_secondary">#FF757575</color>
+    <color name="divider">#FFE0E0E0</color>
 </resources>

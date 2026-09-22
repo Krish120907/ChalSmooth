@@ -56,3 +56,28 @@ Thumbs.db
 !android/app/src/main/assets/model.tflite
 *.ckpt
 *.ckpt.*
+
+# Android / Gradle
+*.apk
+*.aar
+*.ap_
+*.aab
+.gradle/
+/build/
+/android/app/build/
+/android/build/
+local.properties
+*.keystore
+*.jks
+*.keys
+
+# Mappls config files (auto-generated, contains secrets)
+*.a.conf
+*.a.olf
+*.zip
+
+# Kotlin
+*.kt.class
+
+# Logs
+*.log

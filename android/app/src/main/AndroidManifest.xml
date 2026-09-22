@@ -1,68 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
-<<<<<<< HEAD
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
-    <application
-        android:allowBackup="true"
-        android:label="@string/app_name"
-        android:supportsRtl="true"
-        android:theme="@style/Theme.RoadClassifier">
-=======
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+    package="com.chalsmooth.roadclassifier2">
 
-    <!-- Permissions for 50Hz IMU sensing, location, foreground service, and camera -->
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Permissions -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
-    <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:allowBackup="true"
-        android:dataExtractionRules="@xml/data_extraction_rules"
-        android:fullBackupContent="@xml/backup_rules"
-        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.ChalSmooth"
-        tools:targetApi="31">
->>>>>>> 998d5ff (error1)
+        android:theme="@style/Theme.RoadClassifier"
+        android:usesCleartextTraffic="true">
 
+        <!-- MapScreen is now the main launcher activity -->
         <activity
-            android:name=".MainActivity"
+            android:name=".map.MapScreen"
             android:exported="true"
-<<<<<<< HEAD
-            android:screenOrientation="portrait">
-=======
-            android:label="@string/app_name"
-            android:theme="@style/Theme.ChalSmooth"
             android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize">
->>>>>>> 998d5ff (error1)
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-<<<<<<< HEAD
-=======
 
-        <!-- Foreground Sensing Service for 50Hz Accelerometer + Gyroscope -->
-        <service
-            android:name=".sensor.ImuSensingService"
-            android:enabled="true"
+        <!-- Keep the old MainActivity for ML classifier (can be accessed from settings later) -->
+        <activity
+            android:name=".MainActivity"
             android:exported="false"
-            android:foregroundServiceType="location" />
-
->>>>>>> 998d5ff (error1)
+            android:screenOrientation="portrait" />
     </application>
 
 </manifest>
