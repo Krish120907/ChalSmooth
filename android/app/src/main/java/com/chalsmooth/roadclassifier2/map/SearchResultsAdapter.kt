@@ -42,6 +42,8 @@ class SearchResultsAdapter(
         notifyDataSetChanged()
     }
 
+    fun getFirstResult(): GeocodingResult? = results.firstOrNull()
+
     fun clear() {
         results = emptyList()
         notifyDataSetChanged()
