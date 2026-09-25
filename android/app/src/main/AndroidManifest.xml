@@ -35,6 +35,9 @@
             android:name=".MainActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
+        <activity
+            android:name=".map.ContributeActivity"
+            android:screenOrientation="portrait" />
     </application>
 
 </manifest>

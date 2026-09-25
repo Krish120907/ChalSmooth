@@ -68,6 +68,24 @@ class LocationManager(
             .setMaxUpdateDelayMillis(3000)
             .build()
 
+        val builder = com.google.android.gms.location.LocationSettingsRequest.Builder()
+            .addLocationRequest(locationRequest)
+        val client = com.google.android.gms.location.LocationServices.getSettingsClient(activity)
+
+        client.checkLocationSettings(builder.build()).addOnSuccessListener {
+            requestUpdates(locationRequest)
+        }.addOnFailureListener { exception ->
+            if (exception is com.google.android.gms.common.api.ResolvableApiException) {
+                try {
+                    exception.startResolutionForResult(activity, 1002)
+                } catch (e: Exception) {
+                    // Ignore
+                }
+            }
+        }
+    }
+
+    private fun requestUpdates(locationRequest: LocationRequest) {
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(locationResult: LocationResult) {
                 locationResult.lastLocation?.let { location ->
@@ -77,7 +95,9 @@ class LocationManager(
             }
         }
 
-        fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback!!, Looper.getMainLooper())
+        if (hasLocationPermission()) {
+            fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback!!, Looper.getMainLooper())
+        }
     }
 
     fun stopLocationUpdates() {
