@@ -1,185 +1,424 @@
-Architecture at a glance
+# ChalSmooth — Comfort-First Navigation for Indian Roads
 
-Five layers, each independently testable:
+ChalSmooth is an end-to-end system that detects road surface anomalies (potholes, speed bumps, uneven pavement) from smartphone IMU data, crowdsources them into a routable road graph, and exposes **comfort-prioritised routing** — letting drivers trade a few extra minutes for a dramatically smoother ride.
 
-Sensing service — foreground service sampling accelerometer + gyroscope + GPS
-Inference engine — native SVM (JNI) or TFLite interpreter, running on windowed IMU features
-Local store + sync — Room DB of detections, batched upload to a backend
-Road-graph annotation — map-matched pothole events aggregated into per-segment roughness scores
-Routing + UI — candidate route generation, comfort scoring, map with time slider
-Part A — Detection model integration
-Choosing the model
+---
 
-The most directly reusable open-source starting point is aswathselvam/Potholes. It performs realtime pothole detection on Android IMU data with an SVM in C++ integrated through the Java NDK, sampling accelerometer and gyroscope at 50 Hz (20 ms refresh), with the data format being timestamp, Accel X/Y/Z, Gyro X/Y/Z. The trained model is exported to C code with MATLAB Coder, the C-generation repo lives at github.com/aswathselvam/pothole_MATLAB, and Android accesses it through JNI via the svmPredict() function. 
-GitHub
+## Table of Contents
 
-Two things to know before committing to it:
+- [Architecture Overview](#architecture-overview)
+- [Machine Learning Pipeline](#machine-learning-pipeline)
+- [Android Applications](#android-applications)
+- [Frontend & Server](#frontend--server)
+- [Routing & Backend Infrastructure](#routing--backend-infrastructure)
+- [Development Setup](#development-setup)
+- [Usage](#usage)
+- [Data & Models](#data--models)
+- [References](#references)
 
-Orientation calibration is listed as an open TODO — the repo notes calibration should supply a rotation matrix transforming between the orientation used during training data collection and the phone's orientation at detection time. You will have to build this yourself; it is the single biggest source of false positives in IMU pothole detection. 
-GitHub
-The repository publishes no LICENSE file. Under GitHub's terms that means default copyright — all rights reserved. Treat it as reference material, not as something you can ship, unless you email the author and get written permission or an added license. The bundled androidlibsvm wrapper is LIBSVM underneath (BSD-3-Clause, fine to use), and MATLAB Coder-generated C carries MathWorks licensing conditions of its own.
+---
 
-Given that, my recommendation is: use Selvam's repo as the architectural template, but train your own model on your own collected data. That sidesteps the licensing question entirely, matches your own vehicles and phone mounts, and is a stronger research contribution for the poster.
+## Architecture Overview
 
-For the model family itself, two published reference points:
+Five independently testable layers:
 
-The MIT-WPU (Pune) team's approach: they recorded the spikes in accelerometer and gyroscope readings as a vehicle passes over a pothole, took the root mean square of 10 readings for both sensors around the instant of the pothole, stored those in a database, and used those values to train an artificial neural network with ReLU activation and binary cross-entropy loss. Their system maps potholes on the user's route, with accelerometer and gyroscope readings continuously assessed by a deep feed-forward network. This is the closest published analogue to what you are building. 
-github
-mitwpu
-Pawar, Jagtap & Bhoir (ITM Web of Conferences, 2020): a neural network trained on smartphone accelerometer and gyroscope data reaching 94.78% classification accuracy, with 0.71 precision and 0.81 recall — a reasonable trade-off given the heavy class imbalance of the problem. Those precision/recall figures are the realistic bar to benchmark against; treat any claim of ~100% accuracy in this literature with suspicion, since it usually reflects a tiny single-vehicle dataset. 
-itm-conferences
-Preprocessing pipeline
+| Layer | Responsibility | Key Technology |
+|-------|----------------|----------------|
+| **Sensing** | Foreground service sampling accelerometer + gyroscope + GPS at 50 Hz | Android `SensorManager`, `SENSOR_DELAY_GAME` |
+| **Inference** | On-device TFLite MLP (93 features → 4 classes) | TensorFlow Lite, `FeatureExtractor.kt` mirrors `trainer.py` exactly |
+| **Local Store + Sync** | Room DB of detections, batched Wi-Fi upload via WorkManager | Room, WorkManager, Retrofit |
+| **Road-Graph Annotation** | Map-match detections → OSM segments → per-segment roughness scores | OSRM/Valhalla map-matching, HMM, decayed aggregation |
+| **Routing + UI** | λ-sweep constrained shortest path, comfort/time trade-off slider | Custom `LagrangianRoutingEngine`, Mappls/OSRM, Jetpack Compose |
 
-Run this identically at training time and on-device, or the model will silently degrade:
+### Comfort-Prioritised Routing (Core Innovation)
 
-Sample accelerometer and gyroscope via SensorManager at SENSOR_DELAY_GAME and resample to a fixed 50 Hz grid. Android delivers samples at irregular intervals, so interpolate onto a uniform clock using the event.timestamp nanosecond field, not wall-clock time.
-Reorient. Use TYPE_ROTATION_VECTOR → SensorManager.getRotationMatrixFromVector() to rotate raw device-frame readings into a vehicle/world frame (Z aligned with gravity). This makes the model invariant to how the phone sits in the cradle and solves the calibration TODO above.
-Gravity removal. Either use TYPE_LINEAR_ACCELERATION, or high-pass filter Z at ~0.5 Hz. Keep a low-pass gravity estimate for the reorientation step.
-Window. Sliding window of 128 samples (2.56 s) with 50% overlap. Short enough to localise a pothole to a few metres at urban speeds, long enough to capture the full impact-rebound signature.
-Features per window, per axis: mean, standard deviation, RMS, min, max, peak-to-peak, zero-crossing rate, signal magnitude area, plus a few FFT band energies (0–5, 5–15, 15–25 Hz). Add speed from GPS as a feature — the same pothole produces wildly different accelerations at 20 km/h vs 60 km/h, and this is the fix that most student projects miss.
-Normalise with the mean/variance vector saved at training time. Ship those constants as an asset; never recompute them on-device.
-Running inference
+For each directed edge *e*:
+```
+time(e)     = length(e) / speed(e)
+comfort(e)  = length(e) × normalisedRoughness(e)    // 0 = smooth, 1 = worst
+cost(e, λ)  = time(e) × (1 + λ × normalisedRoughness(e))
+```
 
-Option 1 — TFLite (recommended). Train in Python (scikit-learn or Keras), convert to .tflite, drop into app/src/main/assets/, call via the Interpreter API or LiteRT. Simpler build, no NDK toolchain, quantise to int8 for negligible battery cost. For an SVM specifically you can either reimplement the decision function in Kotlin (it is a dot product against support vectors — trivial for a linear kernel, a few lines for RBF) or wrap it as a tiny dense network.
+The UI slider sets a **hard time budget *T***. We binary-search λ over ~8–12 Dijkstra iterations to find the largest λ whose route satisfies `time ≤ T`. This is optimal on the Pareto frontier and runs in milliseconds on a metro-scale graph with contraction hierarchies.
 
-Option 2 — JNI/NDK, mirroring Selvam's design: put the generated C in app/src/main/cpp/, write a CMakeLists.txt, expose Java_com_yourapp_PotholeDetector_svmPredict(JNIEnv*, jobject, jfloatArray), and load with System.loadLibrary(). Choose this only if you are reusing MATLAB Coder output directly.
+**Slider behaviour:**
+- Minimum (T_min) → λ = 0 → fastest route
+- Maximum → λ unbounded → smoothest route
+- Continuous mapping feels responsive
 
-Either way, run inference on a background HandlerThread, never the sensor callback thread.
+Always show the delta: `"+6 min, 71% fewer rough segments"`. A comfort score without a baseline means nothing to users.
 
-From inference to a usable signal
-Model emits a class plus a confidence/decision-function margin per window.
-Severity = normalised peak vertical jerk within the window, bucketed low/medium/high, cross-checked against confidence. Report severity, not just a binary flag — routing needs a weight, not a boolean.
-Debounce: suppress detections within ~3 s or 15 m of a prior one, so one pothole is not counted five times.
-Tag each detection with {lat, lon, speed, heading, severity, confidence, timestamp, deviceModel, vehicleType} from a fused FusedLocationProviderClient reading interpolated to the window's centre timestamp.
-Persist to Room, then upload in batches over Wi-Fi via WorkManager. Never block the drive on network.
-Part B — Turning detections into a routable graph
+---
 
-This is the step that connects detection to navigation, and it deserves more attention than most project plans give it.
+## Machine Learning Pipeline
 
-Map-match each detection to a road segment. Use OSRM's or Valhalla's map-matching endpoint (both open source, both support hidden-Markov-model matching of noisy GPS traces), or Mapbox Map Matching. Raw GPS is 5–15 m off in cities; without matching you will attribute potholes to the wrong road.
-Aggregate per directed segment (OSM way, split at intersections): roughness(s) = Σ(severity_i × confidence_i) / (length_s × distinct_passes_s) Dividing by distinct passes is what makes this crowdsourced rather than popularity-weighted — otherwise a busy arterial always looks worse than a quiet lane.
-Confidence floor: a segment with fewer than N passes (start with N=3) falls back to a neutral prior, and the UI shows it as "unrated" rather than "smooth". Be honest about coverage.
-Decay old observations with a half-life of ~90 days so repairs are reflected.
-Part C — Comfort-prioritised routing
-Cost function
+### Data Sources
 
-For each directed edge e:
+1. **HDF5 (Carlos2019b / PotholeDepth)** — labeled events: `Pothole`, `Speed_bump`, `Metal_bumps`, `Ditch`, `Manhole_cover` (mapped to 3 classes: pothole, speed_bump, uneven_road)
+2. **Kaggle Continuous Drives** — 5 trips with timestamped pothole annotations + full accelerometer streams. Windowed into:
+   - Positive windows centered on pothole timestamps (class 0)
+   - Negative "normal driving" windows sampled between potholes (class 3 — **new class not in HDF5**)
 
-time(e)    = length(e) / speed(e)
-comfort(e) = length(e) × normalisedRoughness(e)     // 0 = smooth, 1 = worst
-cost(e, λ) = time(e) × (1 + λ × normalisedRoughness(e))
+This directly fixes the generalization failure where models trained only on event snippets over-flagged ordinary driving as "pothole".
 
-λ is a detour-tolerance parameter, not a user-facing control.
+### Feature Extraction (`ml/trainer.py::extract_features`)
 
-The slider ↔ λ relationship
+**93 features per 128-sample window (2.56 s @ 50 Hz):**
 
-The slider sets a hard time budget T. This is a constrained shortest path problem (CSP): minimise total discomfort subject to total time ≤ T. It is NP-hard in general, but three practical approaches work at city scale:
+| Group | Axes | Statistics (11 each) |
+|-------|------|---------------------|
+| Acceleration | X, Y, Z, Mag | mean, std (population), min, max, median, ptp, IQR, RMS, energy, skew, kurtosis |
+| Jerk (sample-to-sample diff) | X, Y, Z, Mag | same 11 statistics |
+| Peak / Crossing | Mag | `peak_count` (mag > mean + 2σ), `max_abs_magnitude` |
+| Sign changes | X, Y, Z (mean-centered) | `acc_{x,y,z}_sign_changes` (np.sign semantics: 0 is own state) |
 
-Approach 1 — Lagrangian relaxation / λ-sweep (recommended).
-Run Dijkstra repeatedly on cost(e, λ) while binary-searching λ:
+**Critical implementation details (must match exactly on device):**
+- Population std (ddof=0), NOT sample std
+- Linear-interpolation percentiles (np.percentile default)
+- Skew = mean(((x-μ)/σ)³), Kurtosis = mean(((x-μ)/σ)⁴) - 3
+- Jerk = raw `np.diff`, NO sample-rate scaling
+- Peak threshold = mean + 2×std (population)
+- Sign changes on mean-centered values with np.sign (sign(0)=0)
 
-λ = 0 → fastest route, time T_min
-λ → large → smoothest route, time T_max
-Binary search λ over ~8–12 iterations to find the largest λ whose resulting route has time ≤ T
+### Training (`ml/trainer.py`)
 
-Each iteration is one Dijkstra run; on a metro-scale graph with contraction hierarchies this is milliseconds. The result is optimal on the Pareto frontier and near-optimal for the constrained problem. Slider at maximum → λ unbounded → smoothest route; slider at minimum (= T_min) → λ = 0 → fastest route. The mapping is continuous and feels responsive.
+- **Model:** RandomForest (300 trees, class_weight=balanced)
+- **Validation:** 5-fold GroupKFold by **event/trip** — never leaks samples from same event across train/test
+- **Outputs:** `model.joblib`, `feature_cols.json` (exact 93-name order), `label_map.json`
 
-Approach 2 — full Pareto set. Multi-objective Dijkstra (Martins' algorithm) labelling each node with non-dominated (time, discomfort) pairs, then pick the minimum-discomfort label with time ≤ T. Exact, but label sets blow up on large graphs. Fine for a city-district demo, and it lets you draw the actual trade-off curve on the poster.
+### TFLite Export (`ml/train_tflite.py`)
 
-Approach 3 — API post-filter (fastest to ship). Call Google Directions or Mapbox Directions with alternatives=true, get 2–3 candidate polylines, snap each to your segment graph, score each for time and comfort, and present the best-comfort candidate under T.
+- **Architecture:** Normalization (adapted on train) → Dense(128, ReLU, Dropout 0.25) → Dense(64, ReLU, Dropout 0.2) → Dense(32, ReLU) → Dense(4, Softmax)
+- **Classes:** 0 pothole, 1 speed_bump, 2 uneven_road, 3 normal
+- **Normalization baked in** — Android only computes raw 93 features, no scaler asset needed
+- **Output:** `ml/models/road_model.tflite` → copied to `android/app/src/main/assets/model.tflite`
 
-Approach 3's limitation is real and you should state it in the writeup: commercial APIs return only a handful of alternatives, all optimised for time, so a genuinely smoother back-route may simply never appear as a candidate. It is a good sprint-1 fallback and a poor final answer. Build on your own routing graph (OSRM or Valhalla self-hosted, OSM extract of Pune) so you control edge weights directly — that is what makes Approach 1 possible at all, and it is the difference between a project that demonstrates comfort routing and one that only re-ranks Google's suggestions.
+### Retraining
 
-Presenting the trade-off
+```bash
+cd ml
+source venv/bin/activate
+python train_tflite.py
+cp models/road_model.tflite ../android/app/src/main/assets/model.tflite
+```
 
-Always compute both the λ=0 route and the selected route, and show the delta: "+6 min, 71% fewer rough segments." A comfort score with nothing to compare against means nothing to the user.
+---
 
-Part D — UI design
+## Android Applications
 
-Main navigation screen (single MapFragment, bottom sheet for controls):
+The repo contains **two distinct app modules** under `android/app/src/main/java/`:
 
-Map — Google Maps SDK or MapLibre, current location puck, destination search bar at top.
-Route polyline coloured by roughness — green → amber → red gradient along the line itself. This is the single most legible way to show comfort, far better than a separate number. Use PolylineOptions split into per-segment spans, or a MapLibre line-gradient expression.
-Pothole layer — individual markers when zoomed in past ~z16, a heatmap tile layer when zoomed out. Toggleable.
-Time slider (bottom sheet, horizontal): range from T_min (computed fastest, shown as the left anchor label) to T_min × 1.5, rounded to minutes. Debounce the onProgressChanged callback ~300 ms before recomputing so dragging is smooth.
-Two large metrics side by side above the slider: ETA (e.g. "24 min") and Comfort (e.g. "82 / 100", with a small delta chip "+14 vs fastest").
-Start / Alternatives buttons.
+### 1. Road Classifier Demo (`com.chalsmooth.roadclassifier2.*`)
 
-Recording state — a persistent notification while the sensing service runs, with an explicit stop. Required for foreground-service compliance and, more importantly, for user trust.
+A minimal standalone activity demonstrating the TFLite classifier.
 
-Onboarding / consent — location and motion data are sensitive. A first-run screen explaining what is collected, that traces are uploaded, and offering an opt-out of contribution while still consuming the map. Non-negotiable; also a requirement under India's DPDP Act, 2023 for personal data processing.
+**Files:**
+- `MainActivity.kt` — SensorEventListener @ 50 Hz, 128-sample sliding window, inference every 500 ms
+- `FeatureExtractor.kt` — **Line-for-line port** of `trainer.py::extract_features` (93 features, exact math)
+- `TFLiteClassifier.kt` — Loads `assets/model.tflite`, runs `[1,93] float32 → [1,4] softmax`
+- `OsrmRoutingService.kt` — OSRM API client for alternative routes
 
-Part E — Step-by-step development plan
+**UI:** Text classification + confidence + per-class probability bars. Gyroscope shown for display only.
 
-Phase 0 — Groundwork (week 1)
+**Build & Run:**
+```bash
+# Open android/ in Android Studio (generates Gradle wrapper, downloads SDK)
+# Run on PHYSICAL PHONE — sensors don't work well on emulator
+# Tap "Start Detection", drive over bumps, tap "Stop Detection"
+```
 
-Create the Android Studio project: Kotlin, min SDK 26, Jetpack Compose or Views, MVVM with Hilt.
-Obtain Maps SDK key; enable Maps SDK for Android and Directions API in Google Cloud Console.
-Decide licensing posture: email the Selvam repo author for a license grant, or commit to training your own model. Record the decision.
-Pull an OSM extract for Pune (Geofabrik) and stand up OSRM or Valhalla locally in Docker.
+### 2. Full ChalSmooth App (`com.chalsmooth.app.*`)
 
-Phase 1 — Data collection app (weeks 2–3)
+Production-grade Compose-based app with all five layers.
 
-Build a ForegroundService sampling accelerometer, gyroscope, rotation vector at 50 Hz plus GPS at 1 Hz.
-Write to CSV in the format timestamp, ax, ay, az, gx, gy, gz, lat, lon, speed — matching the timestamp/accel-XYZ/gyro-XYZ format used in the reference project plus location. 
-GitHub
-Add a big "pothole now" button for ground-truth labelling by a passenger, plus post-hoc labelling from a synchronised dashcam video.
-Collect ≥ 5 hours across ≥ 2 vehicles (car and two-wheeler), ≥ 2 phones, mixed road types. Include smooth-road negatives, speed bumps, manhole covers, and rough-but-not-pothole surfaces — speed bumps are the hardest confounder and you need them in the training set.
+**Key Components:**
 
-Phase 2 — Model training (weeks 3–4)
+| Module | Purpose |
+|--------|---------|
+| `sensor/ImuSensingService.kt` | Foreground service @ 50 Hz, computes vertical jerk, emits `ImuSample` via StateFlow, persistent notification |
+| `data/model/Pothole.kt` | Room entity: id, lat, lon, depth_cm, severity (Low/Medium/High/Critical), confidence, timestamp, device_id, vehicle_type |
+| `data/repository/PotholeRepository.kt` | Flow-backed DAO, inserts, queries by bbox/severity |
+| `routing/LagrangianRoutingEngine.kt` | λ-sweep interpolation between preset fastest/smoothest Pune routes (demo data) |
+| `ui/map/MapScreen.kt` | Compose map placeholder with hazard list, severity filters, search |
+| `ui/navigation/NavigationScreen.kt` | Turn-by-turn with comfort score, time delta chip, rough-segment warning |
+| `ui/hud/HudScreen.kt` | Live telemetry: vertical jerk gauge, anomaly detection, speed, recording status |
+| `ui/dashboard/DashboardScreen.kt` | Stats cards, recent detections, contribution toggle |
+| `ui/studio/SensorStudioScreen.kt` | Calibration & data-collection tool for ground truth |
 
-Build the feature extraction pipeline in Python; keep it in a single module you will later port to Kotlin line-for-line.
-Train and compare: linear SVM, RBF SVM, small 1D-CNN over raw windows, gradient boosting.
-Split by drive session, not by window — random window splits leak overlapping data and produce the inflated accuracies seen in parts of this literature.
-Report precision/recall/F1 and a confusion matrix; benchmark against the 94.78% accuracy, 0.71 precision, 0.81 recall figures reported by Pawar et al. 
-itm-conferences
-Export: TFLite conversion, or MATLAB Coder → C if following the JNI path.
+**Dependencies (from `build.gradle.kts`):**
+- Mappls SDK (MapmyIndia) via BoM 2.0.4
+- TensorFlow Lite 2.16.1
+- Retrofit + Moshi + OkHttp for OSRM/Mappls APIs
+- Coroutines, Lifecycle, Material3, Serialization
 
-Phase 3 — On-device inference (week 5)
+**Manifest notes:**
+- Foreground service type `location` + `sensor`
+- `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`, `FOREGROUND_SERVICE`
+- Mappls API key in `local.properties` (not committed)
 
-Port feature extraction to Kotlin; write a unit test asserting Kotlin and Python features match to 1e-5 on a saved fixture window. Do not skip this — silent preprocessing drift is the most common cause of "worked in the notebook, useless on the phone".
-Integrate the interpreter (TFLite Interpreter, or CMakeLists.txt + JNI bridge to svmPredict()).
-Add debouncing, severity computation, GPS tagging.
-Room entities: Detection, DriveSession. WorkManager batch upload.
-Measure battery drain over a 30-minute drive; target < 8%.
+---
 
-Phase 4 — Backend and road graph (weeks 5–6)
+## Frontend & Server
 
-API: POST /detections (batch), GET /segments?bbox= (roughness tiles), POST /route.
-Map-matching job (OSRM /match or Valhalla Meili) → segment aggregation → roughness table.
-Serve roughness as vector tiles for the heatmap layer.
-Injecting roughness into routing: custom OSRM profile with a per-edge penalty table, or Valhalla's costing_options — Valhalla is the easier of the two for dynamic per-edge weights.
+### `server.py` — Lightweight HTTP Server
 
-Phase 5 — Routing engine (weeks 6–7)
+Serves the `frontend/` directory (not present in repo, built by `build.py`) at `http://localhost:3000` with CORS headers and no-cache.
 
-Implement the λ-sweep: binary search over λ, one route request per iteration, cache results per (origin, destination) pair.
-Cap iterations at 10 and add a 500 ms budget; fall back to the last good λ.
-Expose route(origin, dest, maxTime) → {polyline, eta, comfortScore, segmentRoughness[]}.
-Ship the Directions-API post-filter as a feature-flagged fallback for areas with no coverage.
+```bash
+python3 server.py
+# → ChalSmooth Frontend running at http://localhost:3000
+```
 
-Phase 6 — UI (weeks 7–8)
+### `build.py` — Frontend Bundler
 
-Map screen, gradient polyline, pothole/heatmap layers, time slider with debounce, ETA + comfort metrics, delta chip.
-Consent and onboarding flow.
-Recording notification and controls.
+Combines `frontend/css/*.css` into `dist/chalsmooth.min.css`, inlines into `dist/index.html`, copies `js/` assets. Output in `dist/`.
 
-Phase 7 — Evaluation (weeks 9–10)
+---
 
-Detection: drive a held-out route with video ground truth; report precision/recall per severity class and per vehicle type.
-Routing: for ~20 origin-destination pairs, plot the (time, discomfort) Pareto curve; report mean discomfort reduction for a 10% time budget increase. This chart is your headline poster result.
-Subjective: 8–10 riders rate comfort 1–5 on fastest vs comfort route, blind to which is which. Correlate with the computed score.
-Usability: whether users understand the slider without explanation.
-References
-Selvam, A. Potholes — Realtime pothole detection on Android phone's IMU data. github.com/aswathselvam/Potholes (companion MATLAB repo: github.com/aswathselvam/pothole_MATLAB). SVM in C++ via Java NDK, 50 Hz accel + gyro, MATLAB Coder C export, JNI svmPredict(), orientation-calibration listed as open work. No license file published — verify permissions before reuse. 
-GitHub
-Silvister, S., Komandur, D., Kokate, S., Khochare, A., More, U., et al. Deep Learning Approach to Detect Potholes. MIT World Peace University, Pune. RMS of 10 accelerometer and gyroscope readings around the pothole instant, used to train an ANN with ReLU and binary cross-entropy. 
-github
-Pawar, K., Jagtap, S. & Bhoir, S. (2020). Efficient pothole detection using smartphone sensors. ITM Web of Conferences, 32, 03013. Neural network on accel + gyro data, 94.78% accuracy, 0.71 precision, 0.81 recall. Open access. 
-itm-conferences
-Mednis, A., Strazdins, G., Zviedris, R., Kanonirs, G. & Selavo, L. (2011). Real Time Pothole Detection Using Android Smartphones with Accelerometers. DCOSS 2011, pp. 1–6. The foundational citation for smartphone-accelerometer pothole detection. 
-arXiv
-Ozoglu, F. & Gökgöz, T. (2023). Detection of Road Potholes by Applying Convolutional Neural Network Method Based on Road Vibration Data. Sensors, 23(22), 9023. CNN on smartphone accelerometer and gyroscope vibration data, 93.24% validation accuracy. Useful if you prefer a raw-signal CNN over hand-crafted features. 
-nih
-Egaji, O. A. et al. (2021). Real-time machine learning-based approach for pothole detection. Expert Systems with Applications. Two Android apps — one recording accelerometer, gyroscope and GPS, one for labelling — with raw data pre-processed, merged, cleansed and split before feature extraction. A good template for your Phase 1 collection methodology. 
-ScienceDirect
-OSRM (BSD-2) and Valhalla (MIT) — open-source routing engines supporting custom edge costing and map matching.
+## Routing & Backend Infrastructure
+
+### Valhalla Routing Engine (`routing/`)
+
+Custom Valhalla build for dynamic per-edge costing (roughness as edge penalty).
+
+**Files (stubs — need implementation):**
+- `Dockerfile` — Valhalla + OSM extract build
+- `valhalla.json` — Costing options with `road_class_penalty` table
+- `scripts/fetch_osm.sh` — Download Pune/India OSM extract (Geofabrik)
+- `scripts/build_tiles.sh` — Build Valhalla tiles with custom profile
+
+**Valhalla costing concept:**
+```json
+{
+  "costing": "auto",
+  "costing_options": {
+    "auto": {
+      "edge_cost": [
+        {"road_class": "residential", "penalty": 0.0},
+        {"road_class": "tertiary", "penalty": 0.1},
+        {"road_class": "secondary", "penalty": 0.2}
+      ],
+      "dynamic_edge_penalty_table": "roughness_penalty"
+    }
+  }
+}
+```
+
+### Backend (`backend/`)
+
+Placeholder for FastAPI/Flask service:
+- `POST /detections` — batch ingest from Android
+- `GET /segments?bbox=` — roughness vector tiles for heatmap
+- `POST /route` — λ-sweep routing (origin, dest, max_time) → {polyline, eta, comfortScore, segmentRoughness[]}
+
+---
+
+## Development Setup
+
+### Prerequisites
+
+| Tool | Version |
+|------|---------|
+| Python | 3.11+ |
+| Android Studio | Ladybug (2024.2+) |
+| JDK | 17 |
+| Docker | 24+ (for Valhalla) |
+| Node.js | 18+ (if frontend rebuild needed) |
+
+### Python Environment (ML)
+
+```bash
+cd ml
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt  # numpy, pandas, h5py, scikit-learn, tensorflow, joblib
+```
+
+### Android
+
+1. Open `android/` in Android Studio
+2. Add `MAP_KEY=your_mappls_key` to `local.properties`
+3. Connect physical device (USB debugging)
+4. Run `roadclassifier2` or `app` module
+
+### Valhalla Routing (Optional — for full routing)
+
+```bash
+cd routing
+chmod +x scripts/*.sh
+./scripts/fetch_osm.sh        # downloads pune-india.osm.pbf
+./scripts/build_tiles.sh      # builds valhalla tiles (takes 10–30 min)
+docker build -t chalsmooth-valhalla .
+docker run -d -p 8002:8002 chalsmooth-valhalla
+```
+
+---
+
+## Usage
+
+### Road Classifier Demo (Quick Test)
+
+1. Install `roadclassifier2` on phone
+2. Mount phone in car cradle (orientation fixed)
+3. Tap **Start Detection**
+4. Drive — UI shows real-time classification:
+   - 🔴 **Pothole detected** (red)
+   - 🟠 **Speed bump detected** (orange)
+   - 🔵 **Uneven road** (blue)
+   - 🟢 **Normal road** (green)
+5. Tap **Stop Detection**
+
+### Full App Flow (Compose App)
+
+1. **Onboarding** — Consent screen (DPDP Act 2023 compliant)
+2. **Dashboard** — Stats, recent hazards, contribution toggle
+3. **Map** — Search, severity filter, hazard list (map placeholder)
+4. **Navigation** — Enter source/dest → slider appears → drag to trade time for comfort
+5. **HUD** — Live jerk gauge while driving, auto-recording
+6. **Sensor Studio** — Calibrate, record labelled sessions for retraining
+
+### Server + Frontend
+
+```bash
+python3 build.py   # builds dist/
+python3 server.py  # serves at localhost:3000
+```
+
+---
+
+## Data & Models
+
+### Raw Data (`ml/data/raw/`)
+
+```
+ml/data/raw/
+├── pothole_depth.hdf5          # Carlos2019b dataset (events with acc_x/y/z)
+└── Pothole/
+    ├── trip1_sensors.csv       # Kaggle trip 1: timestamp, accelerometerX/Y/Z
+    ├── trip1_potholes.csv      # Kaggle trip 1: pothole timestamps
+    ├── trip2_sensors.csv
+    ├── trip2_potholes.csv
+    ├── trip3_sensors.csv
+    ├── trip3_potholes.csv
+    ├── trip4_sensors.csv
+    ├── trip4_potholes.csv
+    ├── trip5_sensors.csv
+    └── trip5_potholes.csv
+```
+
+### Model Artifacts (`ml/models/`)
+
+| File | Description |
+|------|-------------|
+| `road_model.tflite` | TFLite MLP (93→128→64→32→4), normalization baked in |
+| `road_model.keras` | Keras source model |
+| `feature_cols.json` | **Exact 93 feature names in order** — FeatureExtractor.kt must match |
+| `label_map.json` | `{0:"pothole", 1:"speed_bump", 2:"uneven_road", 3:"normal"}` |
+| `model.joblib` | RandomForest (trainer.py) |
+
+### Android Asset
+
+`android/app/src/main/assets/model.tflite` — copy of `ml/models/road_model.tflite`. Update after retraining.
+
+---
+
+## Key Implementation Invariants
+
+1. **Feature parity** — `FeatureExtractor.kt` **must** produce identical 93 floats in identical order as `trainer.py::extract_features`. Unit test with saved fixture window.
+2. **GroupKFold by event/trip** — Never random-split windows; overlapping windows leak.
+3. **Normalization in model** — TFLite has `Normalization` layer adapted on train data; Android sends raw features.
+4. **Foreground service** — Required for 50 Hz sensing while screen off; persistent notification is mandatory.
+5. **Map-matching before aggregation** — Raw GPS is 5–15 m off; use OSRM/Valhalla `/match` to snap to OSM ways.
+6. **Decay & confidence floor** — Roughness = Σ(severity×confidence) / (length × distinct_passes); half-life ~90 days; <3 passes → "unrated".
+
+---
+
+## Project Structure
+
+```
+ChalSmooth/
+├── README.md                    # This file
+├── server.py                    # Frontend dev server (port 3000)
+├── build.py                     # Frontend bundler → dist/
+├── .gitignore
+├── android/                     # Android Studio project
+│   ├── app/
+│   │   ├── build.gradle.kts
+│   │   └── src/main/
+│   │       ├── assets/model.tflite
+│   │       ├── java/
+│   │       │   ├── com/chalsmooth/roadclassifier2/   # Demo classifier
+│   │       │   └── com/chalsmooth/app/               # Full Compose app
+│   │       └── res/
+│   └── README.md
+├── ml/                          # Machine Learning pipeline
+│   ├── trainer.py               # RandomForest + GroupKFold (3-class)
+│   ├── train_tflite.py          # MLP → TFLite (4-class, norm baked in)
+│   ├── merged.py                # HDF5 + Kaggle merge + GroupKFold (4-class)
+│   ├── data/raw/                # HDF5 + Kaggle CSVs
+│   ├── models/                  # .tflite, .keras, .joblib, feature_cols.json
+│   └── venv/                    # Python virtual env (gitignored)
+├── routing/                     # Valhalla custom routing
+│   ├── Dockerfile
+│   ├── valhalla.json
+│   └── scripts/
+├── backend/                     # Backend API (stub)
+│   └── Dockerfile
+├── frontend/                    # Web frontend source (not in repo)
+├── dist/                        # Bundled frontend (gitignored)
+├── docs/                        # Architecture, dev-plan, licensing (empty stubs)
+└── tools/                       # Misc scripts
+```
+
+---
+
+## References
+
+| # | Citation | Key Insight |
+|---|----------|-------------|
+| 1 | **Selvam, A.** *Potholes — Realtime pothole detection on Android IMU* (github.com/aswathselvam/Potholes) | SVM in C++ via JNI, 50 Hz accel+gyro, MATLAB Coder export, **orientation calibration listed as open TODO**. No license file → treat as reference only. |
+| 2 | **Silvister et al.** *Deep Learning Approach to Detect Potholes*, MIT-WPU Pune | RMS of 10 readings around pothole instant → ANN (ReLU, BCE). Closest published analogue. |
+| 3 | **Pawar, Jagtap & Bhoir** (2020). *Efficient pothole detection using smartphone sensors*. ITM Web of Conferences 32, 03013. | NN on accel+gyro: **94.78% accuracy, 0.71 precision, 0.81 recall** — realistic benchmark. |
+| 4 | **Mednis et al.** (2011). *Real Time Pothole Detection Using Android Smartphones*. DCOSS. | Foundational citation for smartphone-accelerometer pothole detection. |
+| 5 | **Ozoglu & Gökgöz** (2023). *Detection of Road Potholes by Applying CNN on Vibration Data*. Sensors 23(22), 9023. | CNN on raw smartphone IMU, 93.24% val accuracy — alternative to hand-crafted features. |
+| 6 | **Egaji et al.** (2021). *Real-time ML-based approach for pothole detection*. Expert Systems with Applications. | Two-app methodology (record + label), preprocessing pipeline template. |
+| 7 | **OSRM** (BSD-2) & **Valhalla** (MIT) | Open-source routing engines with custom edge costing & map-matching. |
+
+---
+
+## License
+
+- **ML code & Android app:** MIT (add LICENSE file)
+- **Selvam/Potholes repo:** No license published → **do not ship**, use as architectural reference only
+- **LIBSVM** (under androidlibsvm): BSD-3-Clause
+- **MATLAB Coder output:** MathWorks license conditions apply
+- **OSRM:** BSD-2-Clause
+- **Valhalla:** MIT
+- **Mappls SDK:** Proprietary — requires API key
+
+---
+
+## Contributing
+
+1. Fork & create feature branch
+2. Keep `FeatureExtractor.kt` and `trainer.py::extract_features` in sync (add unit test)
+3. Run `python ml/trainer.py` and `python ml/train_tflite.py` before committing model changes
+4. Test on physical device — emulator sensors are unreliable
+5. Update `CHANGELOG.md` (to be created)
+
+---
+
+## Roadmap (from `docs/dev-plan.md` — to be fleshed out)
+
+- [ ] Phase 0: Groundwork — Android project, Maps key, OSRM/Valhalla local, licensing decision
+- [ ] Phase 1: Data collection app — ForegroundService @ 50 Hz, CSV logging, "pothole now" button, dashcam sync
+- [ ] Phase 2: Model training — Feature parity test, compare Linear/RBF SVM, 1D-CNN, GBM; session-split CV
+- [ ] Phase 3: On-device inference — Kotlin feature port + unit test, TFLite integration, debouncing, Room + WorkManager
+- [ ] Phase 4: Backend + road graph — POST /detections, map-matching job, roughness tiles, Valhalla custom profile
+- [ ] Phase 5: Routing engine — λ-sweep binary search, caching, Directions API fallback flag
+- [ ] Phase 6: UI — Gradient polyline, heatmap layer, time slider with debounce, ETA + comfort delta
+- [ ] Phase 7: Evaluation — Held-out video ground truth, Pareto curves for 20 OD pairs, blind rider study (n=8–10)
+
+---
+
+**ChalSmooth** — Smoother rides, smarter routing. 🛣️
