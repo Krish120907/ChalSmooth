@@ -320,31 +320,31 @@
         android:id="@+id/fabMyLocation"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_margin="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="220dp"
         android:layout_gravity="bottom|end"
-        android:layout_marginBottom="72dp"
         android:src="@drawable/ic_my_location"
         android:contentDescription="@string/center_on_location"
         app:backgroundTint="@color/card_background"
         app:tint="@color/text_primary"
-        app:elevation="8dp"
+        app:elevation="26dp"
         app:borderWidth="1dp"
-        android:visibility="gone" />
+        android:visibility="visible" />
 
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fabLayers"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_margin="16dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginBottom="220dp"
         android:layout_gravity="bottom|start"
-        android:layout_marginBottom="72dp"
         android:src="@drawable/ic_layers"
         android:contentDescription="@string/map_layers"
         app:backgroundTint="@color/card_background"
         app:tint="@color/text_primary"
-        app:elevation="8dp"
+        app:elevation="26dp"
         app:borderWidth="1dp"
-        android:visibility="gone" />
+        android:visibility="visible" />
 
     <!-- Progress Bar for Route Loading -->
     <ProgressBar
@@ -398,10 +398,11 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        android:layout_marginBottom="72dp"
-        android:layout_margin="16dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="68dp"
         app:cardCornerRadius="16dp"
-        app:cardElevation="8dp"
+        app:cardElevation="24dp"
         app:cardBackgroundColor="@color/card_background"
         android:visibility="gone">
 
@@ -436,10 +437,11 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        android:layout_marginBottom="72dp"
-        android:layout_margin="16dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="68dp"
         app:cardCornerRadius="16dp"
-        app:cardElevation="8dp"
+        app:cardElevation="24dp"
         app:cardBackgroundColor="@color/card_background"
         android:visibility="gone">
 

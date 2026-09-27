@@ -73,4 +73,7 @@ dependencies {
 
     // On-device AI model (assets/model.tflite)
     implementation("org.tensorflow:tensorflow-lite:2.16.1")
+
+    // ONNX Runtime Android for YOLO Pothole Detector
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.18.0")
 }

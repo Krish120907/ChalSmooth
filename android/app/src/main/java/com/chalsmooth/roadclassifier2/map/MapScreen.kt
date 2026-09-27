@@ -19,6 +19,7 @@ import android.text.TextWatcher
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.chalsmooth.roadclassifier2.data.PotholeDatabaseHelper
 import com.chalsmooth.roadclassifier2.R
 import com.chalsmooth.roadclassifier2.location.LocationManager
 import com.chalsmooth.roadclassifier2.model.LatLng as ModelLatLng
@@ -78,6 +79,7 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
     private var destinationLocation: ModelLatLng? = null
     private var currentRouteInfo: com.chalsmooth.roadclassifier2.model.Route? = null
     private var isInitialCameraPositionSet = false
+    private val potholeMarkers = ArrayList<Marker>()
 
     // ── Services ──────────────────────────────────────────────────────────
     private val locationManager by lazy { LocationManager(this, this) }
@@ -191,7 +193,7 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
         // FABs
         fabMyLocation.setOnClickListener { centerOnCurrentLocation() }
         fabLayers.setOnClickListener {
-            Toast.makeText(this@MapScreen, "Map layers coming soon", Toast.LENGTH_SHORT).show()
+            showServerConfigDialog()
         }
 
         // Zoom controls
@@ -576,6 +578,111 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
                 isInitialCameraPositionSet = true
             }
         }
+
+        loadAndDisplayPotholes()
+    }
+
+    private fun loadAndDisplayPotholes() {
+        val map = mapplsMap ?: return
+
+        potholeMarkers.forEach { it.remove() }
+        potholeMarkers.clear()
+
+        val dbHelper = PotholeDatabaseHelper(this)
+        val potholes = dbHelper.getAllPotholes()
+
+        val icon = IconFactory.getInstance(this).fromBitmap(createPotholeMarkerIcon())
+
+        for (pothole in potholes) {
+            val dateStr = java.text.SimpleDateFormat("dd/MM/yy HH:mm", java.util.Locale.getDefault())
+                .format(java.util.Date(pothole.timestamp))
+
+            val markerOptions = MarkerOptions()
+                .position(LatLng(pothole.latitude, pothole.longitude))
+                .title("${pothole.label} (${(pothole.confidence * 100).toInt()}%)")
+                .snippet("Reported: $dateStr")
+                .icon(icon)
+
+            val marker = map.addMarker(markerOptions)
+            marker?.let { potholeMarkers.add(it) }
+        }
+
+        // Fetch nearby potholes around user's location from remote laptop server
+        val loc = currentLocation ?: return
+        lifecycleScope.launch {
+            val client = com.chalsmooth.roadclassifier2.network.PotholeApiClient(this@MapScreen)
+            val remotePotholes = client.fetchNearbyPotholes(loc.latitude, loc.longitude, radiusKm = 10.0)
+            if (remotePotholes.isNotEmpty()) {
+                var newCount = 0
+                for (rp in remotePotholes) {
+                    if (dbHelper.insertPothole(rp)) {
+                        newCount++
+                    }
+                }
+                if (newCount > 0) {
+                    // Re-render markers with new server data
+                    val updatedList = dbHelper.getAllPotholes()
+                    potholeMarkers.forEach { it.remove() }
+                    potholeMarkers.clear()
+                    for (pothole in updatedList) {
+                        val dateStr = java.text.SimpleDateFormat("dd/MM/yy HH:mm", java.util.Locale.getDefault())
+                            .format(java.util.Date(pothole.timestamp))
+                        val markerOptions = MarkerOptions()
+                            .position(LatLng(pothole.latitude, pothole.longitude))
+                            .title("${pothole.label} (${(pothole.confidence * 100).toInt()}%)")
+                            .snippet("Reported: $dateStr")
+                            .icon(icon)
+                        val marker = map.addMarker(markerOptions)
+                        marker?.let { potholeMarkers.add(it) }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun createPotholeMarkerIcon(): Bitmap {
+        val size = 52
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        val paint = android.graphics.Paint().apply { isAntiAlias = true }
+
+        // Red outer circle
+        paint.color = Color.parseColor("#E53935")
+        canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+
+        // White inner circle
+        paint.color = Color.WHITE
+        canvas.drawCircle(size / 2f, size / 2f, size / 2f * 0.6f, paint)
+
+        // Dark red center
+        paint.color = Color.parseColor("#B71C1C")
+        canvas.drawCircle(size / 2f, size / 2f, size / 2f * 0.35f, paint)
+
+        return bitmap
+    }
+
+    private fun showServerConfigDialog() {
+        val client = com.chalsmooth.roadclassifier2.network.PotholeApiClient(this)
+        val input = EditText(this).apply {
+            setText(client.getServerBaseUrl())
+            hint = "https://xxxx.ngrok-free.app"
+            setPadding(40, 30, 40, 30)
+        }
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Laptop Backend Server URL")
+            .setMessage("Enter your laptop ngrok public URL:")
+            .setView(input)
+            .setPositiveButton("Save & Sync") { _, _ ->
+                val url = input.text.toString().trim()
+                if (url.isNotEmpty()) {
+                    client.setServerBaseUrl(url)
+                    Toast.makeText(this, "Server URL updated!", Toast.LENGTH_SHORT).show()
+                    loadAndDisplayPotholes()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     override fun onMapError(code: Int, message: String?) {
@@ -591,6 +698,7 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
     override fun onResume() {
         super.onResume()
         mapView.onResume()
+        loadAndDisplayPotholes()
         // Re-establish location on resume
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
             == PackageManager.PERMISSION_GRANTED) {

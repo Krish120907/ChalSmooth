@@ -82,3 +82,7 @@ mappls-conf.txt
 
 # Logs
 *.log
+
+# Databases
+backend/*.db
+*.db
