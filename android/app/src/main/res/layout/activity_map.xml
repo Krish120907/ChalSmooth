@@ -17,68 +17,108 @@
         android:layout_height="wrap_content"
         android:layout_margin="16dp"
         android:layout_gravity="top"
-        app:cardCornerRadius="28dp"
+        app:cardCornerRadius="24dp"
         app:cardElevation="8dp"
         app:cardBackgroundColor="@color/card_background"
         android:visibility="visible">
 
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:orientation="horizontal"
-            android:paddingStart="16dp"
-            android:paddingEnd="8dp"
-            android:gravity="center_vertical">
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
 
-            <ImageView
-                android:layout_width="22dp"
-                android:layout_height="22dp"
-                android:src="@drawable/ic_place"
-                android:contentDescription="@string/destination"
-                app:tint="@color/text_secondary" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:orientation="horizontal"
+                android:paddingStart="16dp"
+                android:paddingEnd="8dp"
+                android:gravity="center_vertical">
 
-            <EditText
-                android:id="@+id/etExploreSearch"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:layout_marginStart="12dp"
-                android:layout_marginEnd="8dp"
-                android:hint="Search places…"
-                android:inputType="text"
-                android:singleLine="true"
-                android:maxLines="1"
-                android:imeOptions="actionSearch"
-                android:background="@null"
-                android:textSize="16sp"
-                android:textColor="@color/text_primary"
-                android:textColorHint="@color/text_secondary" />
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:src="@drawable/ic_place"
+                    android:contentDescription="@string/destination"
+                    app:tint="@color/text_secondary" />
 
-            <ImageView
-                android:id="@+id/ivExploreClear"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:src="@drawable/ic_clear"
-                android:contentDescription="@string/clear"
-                app:tint="@color/text_secondary"
-                android:visibility="gone"
-                android:layout_marginEnd="4dp"
-                android:padding="2dp" />
+                <EditText
+                    android:id="@+id/etExploreSearch"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:layout_marginStart="12dp"
+                    android:layout_marginEnd="8dp"
+                    android:hint="Search places…"
+                    android:inputType="text"
+                    android:singleLine="true"
+                    android:maxLines="1"
+                    android:imeOptions="actionSearch"
+                    android:background="@null"
+                    android:textSize="16sp"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="@color/text_secondary" />
 
-            <!-- Navigate / route-planner icon -->
-            <ImageView
-                android:id="@+id/ivNavigate"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:src="@drawable/ic_directions"
-                android:contentDescription="Plan a route"
-                android:padding="8dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                app:tint="@color/blue" />
+                <ImageView
+                    android:id="@+id/ivExploreClear"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:src="@drawable/ic_clear"
+                    android:contentDescription="@string/clear"
+                    app:tint="@color/text_secondary"
+                    android:visibility="gone"
+                    android:layout_marginEnd="4dp"
+                    android:padding="2dp" />
+
+                <!-- Navigate / route-planner icon -->
+                <ImageView
+                    android:id="@+id/ivNavigate"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:src="@drawable/ic_directions"
+                    android:contentDescription="Plan a route"
+                    android:padding="8dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    app:tint="@color/blue" />
+
+            </LinearLayout>
+
+            <View
+                android:id="@+id/exploreDivider"
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/divider"
+                android:visibility="gone" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rvExploreSearchResults"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:maxHeight="280dp"
+                android:overScrollMode="never"
+                android:visibility="gone" />
 
         </LinearLayout>
 
     </com.google.android.material.card.MaterialCardView>
+
+<!-- Quick Search Categories (separate card below search bar) -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rvQuickCategories"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginTop="76dp"
+        android:layout_gravity="top"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:clipToPadding="false"
+        android:overScrollMode="never"
+        android:visibility="visible" />
 
     <!-- ROUTING MODE – source + destination card (hidden) -->
     <com.google.android.material.card.MaterialCardView
@@ -227,30 +267,24 @@
                     android:visibility="gone" />
             </LinearLayout>
 
+            <View
+                android:id="@+id/routingDivider"
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="8dp"
+                android:background="@color/divider"
+                android:visibility="gone" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rvRoutingSearchResults"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:maxHeight="250dp"
+                android:overScrollMode="never"
+                android:visibility="gone" />
+
         </LinearLayout>
 
-    </com.google.android.material.card.MaterialCardView>
-
-    <!-- Shared Search Results dropdown -->
-    <com.google.android.material.card.MaterialCardView
-        android:id="@+id/searchResultsCard"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
-        android:layout_marginTop="90dp"
-        android:layout_gravity="top"
-        app:cardCornerRadius="12dp"
-        app:cardElevation="8dp"
-        app:cardBackgroundColor="@color/card_background"
-        android:visibility="gone">
-
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/rvSearchResults"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:maxHeight="300dp"
-            android:overScrollMode="never" />
     </com.google.android.material.card.MaterialCardView>
 
     <!-- Zoom Controls – right-centre of screen -->

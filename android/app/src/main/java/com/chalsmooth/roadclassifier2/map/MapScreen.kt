@@ -11,17 +11,20 @@ import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import android.text.Editable
 import android.text.TextWatcher
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.chalsmooth.roadclassifier2.data.PotholeDatabaseHelper
 import com.chalsmooth.roadclassifier2.R
 import com.chalsmooth.roadclassifier2.location.LocationManager
+import com.chalsmooth.roadclassifier2.model.GeocodingResult
 import com.chalsmooth.roadclassifier2.model.LatLng as ModelLatLng
 import com.mappls.sdk.core.MapplsInitialiser
 import com.mappls.sdk.maps.Mappls
@@ -37,6 +40,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.consumeEach
 import kotlinx.coroutines.launch
 import android.view.animation.AlphaAnimation
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import com.mappls.sdk.services.api.autosuggest.MapplsAutoSuggest
+import com.mappls.sdk.services.api.autosuggest.MapplsAutosuggestManager
+import com.mappls.sdk.services.api.autosuggest.model.AutoSuggestAtlasResponse
+import com.mappls.sdk.services.api.OnResponseCallback
 
 class MapScreen : AppCompatActivity(), OnMapReadyCallback {
 
@@ -53,10 +62,14 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
     private lateinit var ivClearSource: ImageView
     private lateinit var ivClearDestination: ImageView
     private lateinit var ivGps: ImageView
-    private lateinit var searchResultsCard: View
-    private lateinit var rvSearchResults: androidx.recyclerview.widget.RecyclerView
+    private lateinit var exploreDivider: View
+    private lateinit var rvExploreSearchResults: androidx.recyclerview.widget.RecyclerView
+    private lateinit var rvQuickCategories: androidx.recyclerview.widget.RecyclerView
+    private lateinit var routingDivider: View
+    private lateinit var rvRoutingSearchResults: androidx.recyclerview.widget.RecyclerView
     private lateinit var btnZoomIn: TextView
     private lateinit var btnZoomOut: TextView
+    private lateinit var zoomControls: LinearLayout
     private lateinit var fabMyLocation: com.google.android.material.floatingactionbutton.FloatingActionButton
     private lateinit var fabLayers: com.google.android.material.floatingactionbutton.FloatingActionButton
     private lateinit var pbRouteLoading: ProgressBar
@@ -72,18 +85,23 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
     private var mapplsMap: MapplsMap? = null
     private var currentLocation: ModelLatLng? = null
     private var locationMarker: Marker? = null
-    private var searchAdapter = SearchResultsAdapter { result ->
-        handleSearchResultSelected(result)
-    }
+    private var searchAdapter = SearchResultsAdapter(
+        onItemClick = { result -> handleSearchResultSelected(result) },
+        onHistoryClick = { historyItem -> handleHistoryItemSelected(historyItem) }
+    )
+    private var quickCategoriesAdapter: QuickCategoriesAdapter? = null
     private var sourceLocation: ModelLatLng? = null
     private var destinationLocation: ModelLatLng? = null
     private var currentRouteInfo: com.chalsmooth.roadclassifier2.model.Route? = null
     private var isInitialCameraPositionSet = false
     private val potholeMarkers = ArrayList<Marker>()
+    private val categoryMarkers = ArrayList<Marker>()
 
     // ── Services ──────────────────────────────────────────────────────────
     private val locationManager by lazy { LocationManager(this, this) }
+    private val searchHistoryManager by lazy { SearchHistoryManager.getInstance(this) }
     private var searchJob: Job? = null
+    private var categorySearchJob: Job? = null
 
     private val DEFAULT_ZOOM = 16.5
 
@@ -103,6 +121,7 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
 
         initViews()
         setupClickListeners()
+        setupBackPressHandler()
 
         mapView.onCreate(savedInstanceState)
         mapView.getMapAsync(this)
@@ -130,13 +149,20 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
         ivClearDestination = findViewById(R.id.ivClearDestination)
         ivGps = findViewById(R.id.ivGps)
 
-        // Search results
-        searchResultsCard = findViewById(R.id.searchResultsCard)
-        rvSearchResults = findViewById(R.id.rvSearchResults)
+        // Search results (merged inside respective cards)
+        exploreDivider = findViewById(R.id.exploreDivider)
+        rvExploreSearchResults = findViewById(R.id.rvExploreSearchResults)
+        rvQuickCategories = findViewById(R.id.rvQuickCategories)
+        routingDivider = findViewById(R.id.routingDivider)
+        rvRoutingSearchResults = findViewById(R.id.rvRoutingSearchResults)
+
+        // Setup quick categories
+        setupQuickCategories()
 
         // Misc
         fabMyLocation = findViewById(R.id.fabMyLocation)
         fabLayers = findViewById(R.id.fabLayers)
+        zoomControls = findViewById(R.id.zoomControls)
         pbRouteLoading = findViewById(R.id.pbRouteLoading)
         loadingOverlay = findViewById(R.id.loadingOverlay)
         btnZoomIn = findViewById(R.id.btnZoomIn)
@@ -149,11 +175,38 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
         btnStartJourney = findViewById(R.id.btnStartJourney)
     }
 
+    private fun setupQuickCategories() {
+        val categories = listOf(
+            QuickCategory("Petrol", R.drawable.ic_petrol, "PETROL_PUMP"),
+            QuickCategory("Restaurant", R.drawable.ic_restaurant, "RESTAURANT"),
+            QuickCategory("Park", R.drawable.ic_park, "PARK"),
+            QuickCategory("Hospital", R.drawable.ic_hospital, "HOSPITAL"),
+            QuickCategory("ATM", R.drawable.ic_atm, "ATM"),
+            QuickCategory("Cafe", R.drawable.ic_cafe, "CAFE"),
+            QuickCategory("Pharmacy", R.drawable.ic_pharmacy, "PHARMACY")
+        )
+        quickCategoriesAdapter = QuickCategoriesAdapter(categories) { category ->
+            searchNearbyByCategory(category)
+        }
+        rvQuickCategories.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this, androidx.recyclerview.widget.LinearLayoutManager.HORIZONTAL, false)
+        rvQuickCategories.addItemDecoration(object : androidx.recyclerview.widget.RecyclerView.ItemDecoration() {
+            override fun getItemOffsets(outRect: android.graphics.Rect, view: View, parent: androidx.recyclerview.widget.RecyclerView, state: androidx.recyclerview.widget.RecyclerView.State) {
+                outRect.right = resources.getDimensionPixelSize(R.dimen.category_spacing)
+            }
+        })
+        rvQuickCategories.adapter = quickCategoriesAdapter
+    }
+
     private fun setupClickListeners() {
         // Explore search
         etExploreSearch.setOnFocusChangeListener { _, hasFocus ->
             if (hasFocus) {
-                if (etExploreSearch.text.length >= 3) debounceSearch(etExploreSearch.text.toString())
+                val query = etExploreSearch.text.toString()
+                if (query.length >= 3) {
+                    debounceSearch(query)
+                } else {
+                    showSearchHistory()
+                }
             }
         }
 
@@ -161,7 +214,14 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                 ivExploreClear.visibility = if (s?.isNotEmpty() == true) View.VISIBLE else View.GONE
-                if (etExploreSearch.hasFocus()) debounceSearch(s.toString())
+                if (etExploreSearch.hasFocus()) {
+                    val query = s.toString()
+                    if (query.length >= 3) {
+                        debounceSearch(query)
+                    } else {
+                        showSearchHistory()
+                    }
+                }
             }
             override fun afterTextChanged(s: Editable?) {}
         })
@@ -224,14 +284,26 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
         // Source
         etSource.setOnFocusChangeListener { _, hasFocus ->
             if (hasFocus) {
-                if (etSource.text.length >= 3) debounceSearch(etSource.text.toString())
+                val query = etSource.text.toString()
+                if (query.length >= 3) {
+                    debounceSearch(query)
+                } else {
+                    showSearchHistory()
+                }
             }
         }
         etSource.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                 ivClearSource.visibility = if (s?.isNotEmpty() == true) View.VISIBLE else View.GONE
-                if (etSource.hasFocus()) debounceSearch(s.toString())
+                if (etSource.hasFocus()) {
+                    val query = s.toString()
+                    if (query.length >= 3) {
+                        debounceSearch(query)
+                    } else {
+                        showSearchHistory()
+                    }
+                }
             }
             override fun afterTextChanged(s: Editable?) {}
         })
@@ -248,14 +320,26 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
         // Destination
         etDestination.setOnFocusChangeListener { _, hasFocus ->
             if (hasFocus) {
-                if (etDestination.text.length >= 3) debounceSearch(etDestination.text.toString())
+                val query = etDestination.text.toString()
+                if (query.length >= 3) {
+                    debounceSearch(query)
+                } else {
+                    showSearchHistory()
+                }
             }
         }
         etDestination.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                 ivClearDestination.visibility = if (s?.isNotEmpty() == true) View.VISIBLE else View.GONE
-                if (etDestination.hasFocus()) debounceSearch(s.toString())
+                if (etDestination.hasFocus()) {
+                    val query = s.toString()
+                    if (query.length >= 3) {
+                        debounceSearch(query)
+                    } else {
+                        showSearchHistory()
+                    }
+                }
             }
             override fun afterTextChanged(s: Editable?) {}
         })
@@ -294,12 +378,7 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
                 if (results.isSuccess) {
                     val list = results.getOrNull()
                     if (!list.isNullOrEmpty()) {
-                        searchResultsCard.visibility = View.VISIBLE
-                        searchAdapter.updateResults(list)
-                        if (rvSearchResults.adapter == null) {
-                            rvSearchResults.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this@MapScreen)
-                            rvSearchResults.adapter = searchAdapter
-                        }
+                        showSearchResults(list, emptyList())
                     } else {
                         hideSearchResults()
                     }
@@ -312,40 +391,225 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
         }
     }
 
-    private fun handleSearchResultSelected(result: com.chalsmooth.roadclassifier2.model.GeocodingResult) {
-        hideSearchResults()
-        hideKeyboard()
+    private fun searchNearbyByCategory(category: QuickCategory) {
+        currentLocation ?: return
         
-        etExploreSearch.clearFocus()
-        etSource.clearFocus()
-        etDestination.clearFocus()
-        
-        if (exploreSearchCard.visibility == View.VISIBLE) {
-            etExploreSearch.setText(result.displayName)
-            destinationLocation = result.coordinate
-            mapplsMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(
-                LatLng(result.coordinate.latitude, result.coordinate.longitude), DEFAULT_ZOOM
-            ))
-            
-            mapplsMap?.addMarker(MarkerOptions()
-                .position(LatLng(result.coordinate.latitude, result.coordinate.longitude))
-                .title(result.displayName))
-                
-            tvSelectedPlaceName.text = result.displayName
-            placeDetailsCard.visibility = View.VISIBLE
-        } else if (routingCard.visibility == View.VISIBLE) {
-            if (etSource.hasFocus()) {
-                etSource.setText(result.displayName)
-                sourceLocation = result.coordinate
-            } else if (etDestination.hasFocus()) {
-                etDestination.setText(result.displayName)
-                destinationLocation = result.coordinate
-            }
-            
-            if (sourceLocation != null && destinationLocation != null) {
-                fetchDirections()
+        categorySearchJob?.cancel()
+        categorySearchJob = lifecycleScope.launch {
+            try {
+                val list = searchMapplsNearby(category.mapplsCategory, currentLocation!!)
+                // Filter to 2km radius
+                val nearby = list.filter { result ->
+                    result.coordinate?.let { coord ->
+                        calculateDistance(currentLocation!!, coord) <= 2000.0
+                    } ?: false
+                }
+                if (!nearby.isNullOrEmpty()) {
+                    showCategoryResultsOnMap(nearby)
+                } else {
+                    Toast.makeText(this@MapScreen, "No ${category.name.toLowerCase()}s found within 2km", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(this@MapScreen, "Failed to search nearby ${category.name.toLowerCase()}s", Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    private suspend fun searchMapplsNearby(category: String, location: ModelLatLng): List<GeocodingResult> {
+        return kotlin.coroutines.suspendCoroutine { continuation ->
+            try {
+                val builder = MapplsAutoSuggest.builder()
+                    .query(category)
+                    .setLocation(location.latitude, location.longitude)
+                    .build()
+
+                MapplsAutosuggestManager.newInstance(builder).call(object : OnResponseCallback<AutoSuggestAtlasResponse> {
+                    override fun onSuccess(response: AutoSuggestAtlasResponse?) {
+                        val suggestions = response?.suggestedLocations ?: emptyList()
+                        val results = suggestions.mapNotNull { suggestion ->
+                            val lat = suggestion.latitude
+                            val lng = suggestion.longitude
+                            if (lat != null && lng != null) {
+                                GeocodingResult(
+                                    placeId = suggestion.mapplsPin ?: suggestion.placeAddress ?: "",
+                                    displayName = suggestion.placeName ?: suggestion.placeAddress ?: category,
+                                    coordinate = ModelLatLng(lat, lng),
+                                    addressType = suggestion.type ?: category.toLowerCase(),
+                                    importance = 1.0
+                                )
+                            } else null
+                        }
+                        if (results.isNotEmpty()) {
+                            continuation.resume(results)
+                        } else {
+                            continuation.resumeWithException(Exception("No nearby $category found"))
+                        }
+                    }
+
+                    override fun onError(code: Int, message: String?) {
+                        continuation.resumeWithException(Exception("Mappls nearby search error $code: $message"))
+                    }
+                })
+            } catch (e: Exception) {
+                continuation.resumeWithException(e)
+            }
+        }
+    }
+
+    private fun showCategoryResultsOnMap(results: List<GeocodingResult>) {
+        // Clear previous category markers
+        categoryMarkers.forEach { it.remove() }
+        categoryMarkers.clear()
+
+        val iconFactory = IconFactory.getInstance(this)
+        val icon = iconFactory.fromBitmap(createCategoryMarkerIcon())
+
+        for (result in results) {
+            val markerOptions = MarkerOptions()
+                .position(com.mappls.sdk.maps.geometry.LatLng(result.coordinate.latitude, result.coordinate.longitude))
+                .title(result.displayName)
+                .snippet(result.addressType)
+                .icon(icon)
+
+            val marker = mapplsMap?.addMarker(markerOptions)
+            marker?.let { categoryMarkers.add(it) }
+        }
+
+        // Fit map to show all markers
+        if (categoryMarkers.isNotEmpty()) {
+            val boundsBuilder = com.mappls.sdk.maps.geometry.LatLngBounds.Builder()
+            categoryMarkers.forEach { marker ->
+                boundsBuilder.include(marker.position)
+            }
+            if (currentLocation != null) {
+                boundsBuilder.include(com.mappls.sdk.maps.geometry.LatLng(currentLocation!!.latitude, currentLocation!!.longitude))
+            }
+            val bounds = boundsBuilder.build()
+            mapplsMap?.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, 100))
+        }
+
+        Toast.makeText(this@MapScreen, "Found ${results.size} nearby places", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun createCategoryMarkerIcon(): Bitmap {
+        val size = 48
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        val paint = android.graphics.Paint().apply { isAntiAlias = true }
+        
+        // Green marker for category places
+        paint.color = Color.parseColor("#4CAF50")
+        canvas.drawCircle(size / 2f, size / 2f, size / 2f * 0.7f, paint)
+        
+        paint.color = Color.WHITE
+        canvas.drawCircle(size / 2f, size / 2f, size / 2f * 0.35f, paint)
+        
+        return bitmap
+    }
+
+    private fun showSearchResults(results: List<GeocodingResult>, history: List<SearchHistoryManager.HistoryItem>) {
+        val (divider, recyclerView) = when {
+            exploreSearchCard.visibility == View.VISIBLE -> Pair(exploreDivider, rvExploreSearchResults)
+            routingCard.visibility == View.VISIBLE -> Pair(routingDivider, rvRoutingSearchResults)
+            else -> Pair(exploreDivider, rvExploreSearchResults)
+        }
+
+        if (recyclerView == rvExploreSearchResults) {
+            if (::routingDivider.isInitialized) routingDivider.visibility = View.GONE
+            if (::rvRoutingSearchResults.isInitialized) rvRoutingSearchResults.visibility = View.GONE
+        } else {
+            if (::exploreDivider.isInitialized) exploreDivider.visibility = View.GONE
+            if (::rvExploreSearchResults.isInitialized) rvExploreSearchResults.visibility = View.GONE
+        }
+
+        divider.visibility = View.VISIBLE
+        recyclerView.visibility = View.VISIBLE
+        if (::rvQuickCategories.isInitialized) rvQuickCategories.visibility = View.GONE
+        searchAdapter.updateResults(results, history)
+        searchAdapter.updateLocation(currentLocation)
+        if (recyclerView.adapter == null) {
+            recyclerView.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this@MapScreen)
+            recyclerView.adapter = searchAdapter
+        }
+        setMapControlsVisibility(false)
+    }
+
+    private fun hideSearchResults() {
+        if (::exploreDivider.isInitialized) exploreDivider.visibility = View.GONE
+        if (::rvExploreSearchResults.isInitialized) rvExploreSearchResults.visibility = View.GONE
+        if (::routingDivider.isInitialized) routingDivider.visibility = View.GONE
+        if (::rvRoutingSearchResults.isInitialized) rvRoutingSearchResults.visibility = View.GONE
+        if (::rvQuickCategories.isInitialized) rvQuickCategories.visibility = View.VISIBLE
+        setMapControlsVisibility(true)
+    }
+
+    private fun setMapControlsVisibility(visible: Boolean) {
+        val visibility = if (visible) View.VISIBLE else View.GONE
+        if (::fabMyLocation.isInitialized) fabMyLocation.visibility = visibility
+        if (::fabLayers.isInitialized) fabLayers.visibility = visibility
+        if (::btnZoomIn.isInitialized) btnZoomIn.visibility = visibility
+        if (::btnZoomOut.isInitialized) btnZoomOut.visibility = visibility
+        if (::zoomControls.isInitialized) zoomControls.visibility = visibility
+    }
+
+    private fun showSearchHistory() {
+        val history = searchHistoryManager.getHistory()
+        if (history.isNotEmpty()) {
+            showSearchResults(emptyList(), history)
+        } else {
+            hideSearchResults()
+        }
+    }
+
+    private fun handleSearchResultSelected(result: SearchItem) {
+        when (result) {
+            is SearchItem.Result -> {
+                hideSearchResults()
+                hideKeyboard()
+                saveSearchToHistory(result.geocodingResult)
+                
+                etExploreSearch.clearFocus()
+                etSource.clearFocus()
+                etDestination.clearFocus()
+                
+                if (exploreSearchCard.visibility == View.VISIBLE) {
+                    etExploreSearch.setText(result.geocodingResult.displayName)
+                    destinationLocation = result.geocodingResult.coordinate
+                    mapplsMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(
+                        LatLng(result.geocodingResult.coordinate.latitude, result.geocodingResult.coordinate.longitude), DEFAULT_ZOOM
+                    ))
+                    
+                    mapplsMap?.addMarker(MarkerOptions()
+                        .position(LatLng(result.geocodingResult.coordinate.latitude, result.geocodingResult.coordinate.longitude))
+                        .title(result.geocodingResult.displayName))
+                        
+                    tvSelectedPlaceName.text = result.geocodingResult.displayName
+                    placeDetailsCard.visibility = View.VISIBLE
+                } else if (routingCard.visibility == View.VISIBLE) {
+                    if (etSource.hasFocus()) {
+                        etSource.setText(result.geocodingResult.displayName)
+                        sourceLocation = result.geocodingResult.coordinate
+                    } else if (etDestination.hasFocus()) {
+                        etDestination.setText(result.geocodingResult.displayName)
+                        destinationLocation = result.geocodingResult.coordinate
+                    }
+                    
+                    if (sourceLocation != null && destinationLocation != null) {
+                        fetchDirections()
+                    }
+                }
+            }
+            is SearchItem.History -> {
+                handleHistoryItemSelected(result.item)
+            }
+            is SearchItem.Header -> {
+                // Do nothing for headers
+            }
+        }
+    }
+
+    private fun saveSearchToHistory(result: GeocodingResult) {
+        searchHistoryManager.saveSearch(result)
     }
 
     private fun fetchDirections() {
@@ -393,8 +657,42 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
         }
     }
 
-    private fun hideSearchResults() {
-        searchResultsCard.visibility = View.GONE
+    private fun handleHistoryItemSelected(item: SearchHistoryManager.HistoryItem) {
+        hideSearchResults()
+        hideKeyboard()
+        
+        etExploreSearch.clearFocus()
+        etSource.clearFocus()
+        etDestination.clearFocus()
+        
+        item.coordinate?.let { coordinate ->
+            if (exploreSearchCard.visibility == View.VISIBLE) {
+                etExploreSearch.setText(item.displayName)
+                destinationLocation = coordinate
+                mapplsMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(
+                    LatLng(coordinate.latitude, coordinate.longitude), DEFAULT_ZOOM
+                ))
+                
+                mapplsMap?.addMarker(MarkerOptions()
+                    .position(LatLng(coordinate.latitude, coordinate.longitude))
+                    .title(item.displayName))
+                    
+                tvSelectedPlaceName.text = item.displayName
+                placeDetailsCard.visibility = View.VISIBLE
+            } else if (routingCard.visibility == View.VISIBLE) {
+                if (etSource.hasFocus()) {
+                    etSource.setText(item.displayName)
+                    sourceLocation = coordinate
+                } else if (etDestination.hasFocus()) {
+                    etDestination.setText(item.displayName)
+                    destinationLocation = coordinate
+                }
+                
+                if (sourceLocation != null && destinationLocation != null) {
+                    fetchDirections()
+                }
+            }
+        }
     }
 
     private fun switchToExploreMode() {
@@ -447,6 +745,36 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
         imm?.hideSoftInputFromWindow(view.windowToken, 0)
     }
 
+    private fun isSearchResultsVisible() =
+        rvExploreSearchResults.visibility == View.VISIBLE ||
+        rvRoutingSearchResults.visibility == View.VISIBLE
+
+    private fun dismissSearchBar() {
+        hideSearchResults()
+        etExploreSearch.clearFocus()
+        etSource.clearFocus()
+        etDestination.clearFocus()
+        hideKeyboard()
+    }
+
+    private fun setupBackPressHandler() {
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                when {
+                    // 1. Search suggestions/history are open — close them
+                    isSearchResultsVisible() -> dismissSearchBar()
+                    // 2. In routing mode — go back to explore mode
+                    routingCard.visibility == View.VISIBLE -> switchToExploreMode()
+                    // 3. Nothing special — close the activity normally
+                    else -> {
+                        isEnabled = false
+                        onBackPressedDispatcher.onBackPressed()
+                    }
+                }
+            }
+        })
+    }
+
     private fun requestLocationPermission() {
         locationManager.requestLocationPermission(object : LocationManager.LocationPermissionCallback {
             override fun onPermissionGranted() {
@@ -479,6 +807,7 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     updateLocationMarker(location)
+                    searchAdapter.updateLocation(location)
                     if (!isInitialCameraPositionSet) {
                         centerOnCurrentLocation(onFinished = ::dismissLoadingOverlay)
                         isInitialCameraPositionSet = true
@@ -495,6 +824,7 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
         if (location != null) {
             currentLocation = location
             updateLocationMarker(location)
+            searchAdapter.updateLocation(location)
             if (!isInitialCameraPositionSet) {
                 centerOnCurrentLocation(onFinished = ::dismissLoadingOverlay)
                 isInitialCameraPositionSet = true
@@ -576,6 +906,16 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
             if (!isInitialCameraPositionSet) {
                 centerOnCurrentLocation(onFinished = ::dismissLoadingOverlay)
                 isInitialCameraPositionSet = true
+            }
+        }
+
+        // Dismiss search when tapping the map
+        mapplsMap.addOnMapClickListener { _ ->
+            if (isSearchResultsVisible()) {
+                dismissSearchBar()
+                true
+            } else {
+                false
             }
         }
 
@@ -715,8 +1055,23 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
     override fun onDestroy() {
         super.onDestroy(); mapView.onDestroy()
         locationManager.stopLocationUpdates(); searchJob?.cancel()
+        categorySearchJob?.cancel()
     }
     override fun onLowMemory() { super.onLowMemory(); mapView.onLowMemory() }
+
+    private fun calculateDistance(loc1: ModelLatLng, loc2: ModelLatLng): Double {
+        val R = 6371000.0 // Earth radius in meters
+        val lat1 = Math.toRadians(loc1.latitude)
+        val lat2 = Math.toRadians(loc2.latitude)
+        val deltaLat = Math.toRadians(loc2.latitude - loc1.latitude)
+        val deltaLng = Math.toRadians(loc2.longitude - loc1.longitude)
+
+        val a = Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+                Math.cos(lat1) * Math.cos(lat2) *
+                Math.sin(deltaLng / 2) * Math.sin(deltaLng / 2)
+        val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+        return R * c
+    }
 
     companion object {
         private const val TAG = "MapScreen"

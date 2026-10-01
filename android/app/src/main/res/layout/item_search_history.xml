@@ -11,7 +11,7 @@
         android:id="@+id/ivPlaceIcon"
         android:layout_width="32dp"
         android:layout_height="32dp"
-        android:src="@drawable/ic_place"
+        android:src="@drawable/ic_history"
         android:tint="@color/text_secondary"
         android:layout_marginEnd="16dp" />
 
@@ -49,4 +49,13 @@
             android:maxLines="1"
             android:layout_marginTop="2dp" />
     </LinearLayout>
+
+    <ImageView
+        android:id="@+id/ivHistoryIcon"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:src="@drawable/ic_history"
+        android:tint="@color/text_secondary"
+        android:layout_marginStart="8dp"
+        android:contentDescription="@string/search_history" />
 </LinearLayout>

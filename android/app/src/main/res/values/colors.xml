@@ -17,4 +17,9 @@
     <color name="text_primary">#FF212121</color>
     <color name="text_secondary">#FF757575</color>
     <color name="divider">#FFE0E0E0</color>
+    <color name="chip_background">#FFFFFFFF</color>
+    <color name="chip_stroke">#FFE0E0E0</color>
+    <color name="chip_selected_background">#FFE3F2FD</color>
+    <color name="chip_selected_stroke">#FF2196F3</color>
+    <color name="chip_icon_tint">#FF666666</color>
 </resources>
