@@ -21,6 +21,7 @@ import com.chalsmooth.roadclassifier2.ai.YoloPotholeDetector
 import com.chalsmooth.roadclassifier2.data.PotholeDatabaseHelper
 import com.chalsmooth.roadclassifier2.data.PotholeEntry
 import com.chalsmooth.roadclassifier2.location.LocationManager
+import com.chalsmooth.roadclassifier2.location.LocationWithBearing
 import com.chalsmooth.roadclassifier2.model.LatLng
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.consumeEach
@@ -131,15 +132,15 @@ class ContributeActivity : AppCompatActivity() {
         locationManager?.let { mgr ->
             mgr.startLocationUpdates()
             lifecycleScope.launch {
-                mgr.getLocationChannel().consumeEach { loc ->
-                    currentLocation = loc
-                    tvGpsStatus.text = String.format("GPS: %.4f, %.4f", loc.latitude, loc.longitude)
+                mgr.getLocationChannel().consumeEach { loc: LocationWithBearing ->
+                    currentLocation = loc.latLng
+                    tvGpsStatus.text = String.format("GPS: %.4f, %.4f", loc.latLng.latitude, loc.latLng.longitude)
                 }
             }
             val lastLoc = mgr.getLastKnownLocation()
             if (lastLoc != null) {
-                currentLocation = lastLoc
-                tvGpsStatus.text = String.format("GPS: %.4f, %.4f", lastLoc.latitude, lastLoc.longitude)
+                currentLocation = lastLoc.latLng
+                tvGpsStatus.text = String.format("GPS: %.4f, %.4f", lastLoc.latLng.latitude, lastLoc.latLng.longitude)
             }
         }
     }

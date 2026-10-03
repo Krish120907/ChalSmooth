@@ -38,4 +38,14 @@
     <string name="recommended">Recommended</string>
     <string name="fastest">Fastest</string>
     <string name="shortest">Shortest</string>
+    <string name="bookmark">Bookmark</string>
+    <string name="bookmarks">Bookmarks</string>
+    <string name="bookmark_saved">Saved to bookmarks</string>
+    <string name="bookmark_removed">Removed from bookmarks</string>
+    <string name="collection">Collection</string>
+    <string name="new_collection">New Collection</string>
+    <string name="collection_name">Collection name</string>
+    <string name="create_collection">Create</string>
+    <string name="save_to_collection">Save to collection</string>
+    <string name="no_bookmarks_yet">No bookmarks yet. Tap the bookmark icon on search results to save places.</string>
 </resources>

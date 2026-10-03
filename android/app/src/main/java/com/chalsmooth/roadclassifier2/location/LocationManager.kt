@@ -20,6 +20,11 @@ import com.google.android.gms.location.Priority
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 
+data class LocationWithBearing(
+    val latLng: LatLng,
+    val bearing: Float
+)
+
 class LocationManager(
     private val context: Context,
     private val activity: Activity
@@ -27,7 +32,7 @@ class LocationManager(
 
     private val fusedLocationClient: FusedLocationProviderClient = LocationServices.getFusedLocationProviderClient(context)
     private var locationCallback: LocationCallback? = null
-    private val locationChannel = Channel<LatLng>(1)
+    private val locationChannel = Channel<LocationWithBearing>(1)
 
     private val LOCATION_PERMISSION_REQUEST_CODE = 1001
 
@@ -90,7 +95,8 @@ class LocationManager(
             override fun onLocationResult(locationResult: LocationResult) {
                 locationResult.lastLocation?.let { location ->
                     val latLng = LatLng(location.latitude, location.longitude)
-                    locationChannel.trySend(latLng)
+                    val bearing = if (location.hasBearing()) location.bearing else 0f
+                    locationChannel.trySend(LocationWithBearing(latLng, bearing))
                 }
             }
         }
@@ -105,19 +111,21 @@ class LocationManager(
         locationCallback = null
     }
 
-    fun getLastKnownLocation(): LatLng? {
+    fun getLastKnownLocation(): LocationWithBearing? {
         if (!hasLocationPermission()) return null
-        // Note: getLastLocation is deprecated, but we use it for initial location
         return try {
             val task = fusedLocationClient.lastLocation
             val location = task.getResult()
-            location?.let { LatLng(it.latitude, it.longitude) }
+            location?.let {
+                val bearing = if (it.hasBearing()) it.bearing else 0f
+                LocationWithBearing(LatLng(it.latitude, it.longitude), bearing)
+            }
         } catch (e: Exception) {
             null
         }
     }
 
-    fun getLocationChannel(): ReceiveChannel<LatLng> = locationChannel
+    fun getLocationChannel(): ReceiveChannel<LocationWithBearing> = locationChannel
 
     @OnLifecycleEvent(Lifecycle.Event.ON_DESTROY)
     fun onDestroy() {

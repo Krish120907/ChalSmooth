@@ -454,14 +454,33 @@
                 android:textStyle="bold"
                 android:textColor="@color/text_primary" />
 
-            <Button
-                android:id="@+id/btnGetDirections"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:text="Get Directions"
-                android:backgroundTint="@color/blue"
-                android:textColor="@android:color/white" />
+                android:orientation="horizontal"
+                android:layout_marginTop="16dp">
+
+                <Button
+                    android:id="@+id/btnGetDirections"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginEnd="8dp"
+                    android:text="Get Directions"
+                    android:backgroundTint="@color/blue"
+                    android:textColor="@android:color/white" />
+
+                <ImageButton
+                    android:id="@+id/btnBookmarkPlace"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_gravity="center_vertical"
+                    android:src="@drawable/ic_bookmark_outline"
+                    android:contentDescription="@string/bookmark"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:tint="@color/green"
+                    android:scaleType="centerInside" />
+            </LinearLayout>
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
@@ -557,6 +576,30 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="Contribute"
+                android:textSize="12sp"
+                android:textColor="@color/text_secondary" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/btnNavBookmarks"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="?attr/selectableItemBackground">
+
+            <ImageView
+                android:id="@+id/ivNavBookmarks"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:src="@drawable/ic_bookmark_outline"
+                app:tint="@color/text_secondary" />
+            <TextView
+                android:id="@+id/tvNavBookmarks"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/bookmarks"
                 android:textSize="12sp"
                 android:textColor="@color/text_secondary" />
         </LinearLayout>

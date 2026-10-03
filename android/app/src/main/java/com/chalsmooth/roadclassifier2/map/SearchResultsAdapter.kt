@@ -18,7 +18,8 @@ sealed class SearchItem {
 
 class SearchResultsAdapter(
     private val onItemClick: (SearchItem) -> Unit,
-    private val onHistoryClick: (SearchHistoryManager.HistoryItem) -> Unit = {}
+    private val onHistoryClick: (SearchHistoryManager.HistoryItem) -> Unit = {},
+    private val onBookmarkClick: (GeocodingResult) -> Unit = {}
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     private var items = emptyList<SearchItem>()
@@ -35,6 +36,7 @@ class SearchResultsAdapter(
         val tvPlaceName: TextView = view.findViewById(R.id.tvPlaceName)
         val tvPlaceAddress: TextView = view.findViewById(R.id.tvPlaceAddress)
         val tvPlaceDistance: TextView = view.findViewById(R.id.tvPlaceDistance)
+        val ivBookmark: ImageView = view.findViewById(R.id.ivBookmark)
     }
 
     inner class HistoryViewHolder(view: View) : RecyclerView.ViewHolder(view) {
@@ -75,6 +77,28 @@ class SearchResultsAdapter(
                 holder.tvPlaceAddress.text = item.geocodingResult.displayName
                 holder.tvPlaceDistance.text = calculateDistance(item.geocodingResult.coordinate)
                 holder.itemView.setOnClickListener { onItemClick(item) }
+                
+                // Bookmark button
+                val bookmarkManager = BookmarkManager.getInstance(holder.itemView.context)
+                val isBookmarked = bookmarkManager.getAllBookmarks().any { 
+                    it.latitude == item.geocodingResult.coordinate.latitude && 
+                    it.longitude == item.geocodingResult.coordinate.longitude 
+                }
+                holder.ivBookmark.setImageResource(if (isBookmarked) R.drawable.ic_bookmark_filled else R.drawable.ic_bookmark_outline)
+                holder.ivBookmark.setOnClickListener { v ->
+                    val newBookmarkState = !isBookmarked
+                    if (newBookmarkState) {
+                        onBookmarkClick(item.geocodingResult)
+                    } else {
+                        // Remove bookmark - find and delete
+                        val bookmark = bookmarkManager.getAllBookmarks().firstOrNull { 
+                            it.latitude == item.geocodingResult.coordinate.latitude && 
+                            it.longitude == item.geocodingResult.coordinate.longitude 
+                        }
+                        bookmark?.let { bookmarkManager.deleteBookmark(it.id) }
+                    }
+                    holder.ivBookmark.setImageResource(if (newBookmarkState) R.drawable.ic_bookmark_filled else R.drawable.ic_bookmark_outline)
+                }
             }
             is HistoryViewHolder -> {
                 val item = items[position] as SearchItem.History

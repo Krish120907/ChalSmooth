@@ -1,6 +1,7 @@
 package com.chalsmooth.roadclassifier2.map
 
 import android.Manifest
+import android.content.Intent
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -24,6 +25,7 @@ import androidx.lifecycle.lifecycleScope
 import com.chalsmooth.roadclassifier2.data.PotholeDatabaseHelper
 import com.chalsmooth.roadclassifier2.R
 import com.chalsmooth.roadclassifier2.location.LocationManager
+import com.chalsmooth.roadclassifier2.location.LocationWithBearing
 import com.chalsmooth.roadclassifier2.model.GeocodingResult
 import com.chalsmooth.roadclassifier2.model.LatLng as ModelLatLng
 import com.mappls.sdk.core.MapplsInitialiser
@@ -77,17 +79,23 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
     private lateinit var placeDetailsCard: View
     private lateinit var tvSelectedPlaceName: TextView
     private lateinit var btnGetDirections: Button
+    private lateinit var btnBookmarkPlace: android.widget.ImageButton
     private lateinit var routeDetailsCard: View
     private lateinit var tvRouteInfo: TextView
     private lateinit var btnStartJourney: Button
+    private lateinit var btnNavBookmarks: LinearLayout
+    private lateinit var ivNavBookmarks: ImageView
+    private lateinit var tvNavBookmarks: TextView
 
     // ── Map state ─────────────────────────────────────────────────────────
     private var mapplsMap: MapplsMap? = null
     private var currentLocation: ModelLatLng? = null
+    private var currentBearing: Float = 0f
     private var locationMarker: Marker? = null
     private var searchAdapter = SearchResultsAdapter(
         onItemClick = { result -> handleSearchResultSelected(result) },
-        onHistoryClick = { historyItem -> handleHistoryItemSelected(historyItem) }
+        onHistoryClick = { historyItem -> handleHistoryItemSelected(historyItem) },
+        onBookmarkClick = { result -> showBookmarkCollectionDialog(result) }
     )
     private var quickCategoriesAdapter: QuickCategoriesAdapter? = null
     private var sourceLocation: ModelLatLng? = null
@@ -96,6 +104,10 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
     private var isInitialCameraPositionSet = false
     private val potholeMarkers = ArrayList<Marker>()
     private val categoryMarkers = ArrayList<Marker>()
+    private var isNavigationMode = false
+    private var pendingBookmarkLat: Double = 0.0
+    private var pendingBookmarkLng: Double = 0.0
+    private var pendingBookmarkName: String = ""
 
     // ── Services ──────────────────────────────────────────────────────────
     private val locationManager by lazy { LocationManager(this, this) }
@@ -104,6 +116,7 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
     private var categorySearchJob: Job? = null
 
     private val DEFAULT_ZOOM = 16.5
+    private val NAVIGATION_ZOOM = 18.5
 
     // ══════════════════════════════════════════════════════════════════════
     // Lifecycle
@@ -122,6 +135,9 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
         initViews()
         setupClickListeners()
         setupBackPressHandler()
+        
+        // Handle bookmark intent
+        handleBookmarkIntent()
 
         mapView.onCreate(savedInstanceState)
         mapView.getMapAsync(this)
@@ -129,6 +145,12 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
         requestLocationPermission()
 
         mapView.postDelayed({ dismissLoadingOverlay() }, 6000L)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleBookmarkIntent()
     }
 
     private fun initViews() {
@@ -170,9 +192,46 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
         placeDetailsCard = findViewById(R.id.placeDetailsCard)
         tvSelectedPlaceName = findViewById(R.id.tvSelectedPlaceName)
         btnGetDirections = findViewById(R.id.btnGetDirections)
+        btnBookmarkPlace = findViewById(R.id.btnBookmarkPlace)
         routeDetailsCard = findViewById(R.id.routeDetailsCard)
         tvRouteInfo = findViewById(R.id.tvRouteInfo)
         btnStartJourney = findViewById(R.id.btnStartJourney)
+
+        // Bottom nav bookmarks
+        btnNavBookmarks = findViewById(R.id.btnNavBookmarks)
+        ivNavBookmarks = findViewById(R.id.ivNavBookmarks)
+        tvNavBookmarks = findViewById(R.id.tvNavBookmarks)
+    }
+
+    private fun handleBookmarkIntent() {
+        intent.getDoubleExtra("bookmark_lat", 0.0).let { lat ->
+            val lng = intent.getDoubleExtra("bookmark_lng", 0.0)
+            val name = intent.getStringExtra("bookmark_name") ?: ""
+            val address = intent.getStringExtra("bookmark_address") ?: ""
+            if (lat != 0.0 && lng != 0.0) {
+                val coordinate = ModelLatLng(lat, lng)
+                destinationLocation = coordinate
+                etExploreSearch.setText(name)
+                switchToExploreMode()
+                
+                // Store for onMapReady if map not ready yet
+                pendingBookmarkLat = lat
+                pendingBookmarkLng = lng
+                pendingBookmarkName = name
+                
+                if (mapplsMap != null) {
+                    animateToBookmark(lat, lng, name)
+                }
+            }
+        }
+    }
+    
+    private fun animateToBookmark(lat: Double, lng: Double, name: String) {
+        val position = LatLng(lat, lng)
+        mapplsMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(position, DEFAULT_ZOOM))
+        mapplsMap?.addMarker(com.mappls.sdk.maps.annotations.MarkerOptions()
+            .position(position)
+            .title(name))
     }
 
     private fun setupQuickCategories() {
@@ -273,9 +332,28 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
         }
 
         btnGetDirections.setOnClickListener { switchToRoutingMode(fromPlaceDetails = true) }
-        btnStartJourney.setOnClickListener { Toast.makeText(this@MapScreen, "Journey started!", Toast.LENGTH_SHORT).show() }
+        btnBookmarkPlace.setOnClickListener {
+            destinationLocation?.let { coord ->
+                val result = GeocodingResult(
+                    placeId = "",
+                    displayName = tvSelectedPlaceName.text.toString(),
+                    coordinate = coord,
+                    addressType = "bookmark",
+                    importance = 1.0
+                )
+                showBookmarkCollectionDialog(result)
+                // Update bookmark icon after a short delay to allow dialog to complete
+                btnBookmarkPlace.postDelayed({ updateBookmarkIcon() }, 500)
+            }
+        }
+        btnStartJourney.setOnClickListener { startNavigationMode() }
         findViewById<View>(R.id.btnNavContribute).setOnClickListener {
             startActivity(android.content.Intent(this, ContributeActivity::class.java))
+            overridePendingTransition(0, 0)
+        }
+        
+        btnNavBookmarks.setOnClickListener {
+            startActivity(android.content.Intent(this, BookmarksActivity::class.java))
             overridePendingTransition(0, 0)
         }
     }
@@ -585,6 +663,7 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
                         
                     tvSelectedPlaceName.text = result.geocodingResult.displayName
                     placeDetailsCard.visibility = View.VISIBLE
+                    updateBookmarkIcon()
                 } else if (routingCard.visibility == View.VISIBLE) {
                     if (etSource.hasFocus()) {
                         etSource.setText(result.geocodingResult.displayName)
@@ -679,6 +758,7 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
                     
                 tvSelectedPlaceName.text = item.displayName
                 placeDetailsCard.visibility = View.VISIBLE
+                updateBookmarkIcon()
             } else if (routingCard.visibility == View.VISIBLE) {
                 if (etSource.hasFocus()) {
                     etSource.setText(item.displayName)
@@ -802,12 +882,13 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
 
     private fun observeLocation() {
         lifecycleScope.launch {
-            locationManager.getLocationChannel().consumeEach<ModelLatLng> { location ->
-                currentLocation = location
+            locationManager.getLocationChannel().consumeEach<LocationWithBearing> { locationWithBearing ->
+                currentLocation = locationWithBearing.latLng
+                currentBearing = locationWithBearing.bearing
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
-                    updateLocationMarker(location)
-                    searchAdapter.updateLocation(location)
+                    updateLocationMarker(locationWithBearing)
+                    searchAdapter.updateLocation(locationWithBearing.latLng)
                     if (!isInitialCameraPositionSet) {
                         centerOnCurrentLocation(onFinished = ::dismissLoadingOverlay)
                         isInitialCameraPositionSet = true
@@ -820,11 +901,12 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
     }
 
     private fun getCurrentLocation() {
-        val location = locationManager.getLastKnownLocation()
-        if (location != null) {
-            currentLocation = location
-            updateLocationMarker(location)
-            searchAdapter.updateLocation(location)
+        val locationWithBearing = locationManager.getLastKnownLocation()
+        if (locationWithBearing != null) {
+            currentLocation = locationWithBearing.latLng
+            currentBearing = locationWithBearing.bearing
+            updateLocationMarker(locationWithBearing)
+            searchAdapter.updateLocation(locationWithBearing.latLng)
             if (!isInitialCameraPositionSet) {
                 centerOnCurrentLocation(onFinished = ::dismissLoadingOverlay)
                 isInitialCameraPositionSet = true
@@ -832,12 +914,15 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
         }
     }
 
-    private fun updateLocationMarker(location: ModelLatLng) {
+    private fun updateLocationMarker(locationWithBearing: LocationWithBearing) {
         locationMarker?.remove()
         val markerOptions = MarkerOptions()
-            .position(LatLng(location.latitude, location.longitude))
+            .position(LatLng(locationWithBearing.latLng.latitude, locationWithBearing.latLng.longitude))
             .title("Current Location")
-            .icon(IconFactory.getInstance(this).fromBitmap(createLocationMarkerIcon()))
+            .icon(IconFactory.getInstance(this).fromBitmap(
+                if (isNavigationMode) createArrowMarkerIcon(locationWithBearing.bearing)
+                else createLocationMarkerIcon()
+            ))
         locationMarker = mapplsMap?.addMarker(markerOptions)
     }
 
@@ -858,7 +943,7 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
             mapplsMap?.animateCamera(
                 CameraUpdateFactory.newLatLngZoom(
                     LatLng(location.latitude, location.longitude),
-                    DEFAULT_ZOOM
+                    if (isNavigationMode) NAVIGATION_ZOOM else DEFAULT_ZOOM
                 ),
                 object : MapplsMap.CancelableCallback {
                     override fun onFinish() { onFinished?.invoke() }
@@ -867,6 +952,176 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
             )
         } ?: run {
             onFinished?.invoke()
+        }
+    }
+
+    private fun startNavigationMode() {
+        isNavigationMode = true
+        routeDetailsCard.visibility = View.GONE
+        
+        currentLocation?.let { location ->
+            mapplsMap?.animateCamera(
+                CameraUpdateFactory.newLatLngZoom(
+                    LatLng(location.latitude, location.longitude),
+                    NAVIGATION_ZOOM
+                )
+            )
+        }
+        
+        // Update marker to arrow
+        if (currentLocation != null) {
+            updateLocationMarker(LocationWithBearing(currentLocation!!, currentBearing))
+        }
+        
+        Toast.makeText(this@MapScreen, "Navigation started - follow the arrow", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun createArrowMarkerIcon(bearing: Float): Bitmap {
+        val size = 80
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        val paint = android.graphics.Paint().apply { isAntiAlias = true }
+        
+        // Rotate canvas around center
+        canvas.translate(size / 2f, size / 2f)
+        canvas.rotate(bearing)
+        canvas.translate(-size / 2f, -size / 2f)
+        
+        val centerX = size / 2f
+        val centerY = size / 2f
+        
+        // Outer glow/shadow circle
+        val shadowPaint = android.graphics.Paint().apply { isAntiAlias = true }
+        shadowPaint.color = Color.parseColor("#000000")
+        shadowPaint.setShadowLayer(8f, 0f, 4f, Color.parseColor("#40000000"))
+        canvas.drawCircle(centerX, centerY, size * 0.35f, shadowPaint)
+        
+        // White background circle
+        paint.style = android.graphics.Paint.Style.FILL
+        paint.color = Color.WHITE
+        canvas.drawCircle(centerX, centerY, size * 0.35f, paint)
+        
+        // Blue accent circle
+        paint.color = Color.parseColor("#1976D2")
+        canvas.drawCircle(centerX, centerY, size * 0.28f, paint)
+        
+        // Arrow shape path
+        val path = android.graphics.Path()
+        val arrowHeight = size * 0.55f
+        val arrowWidth = size * 0.45f
+        val headHeight = arrowHeight * 0.55f
+        val bodyHeight = arrowHeight - headHeight
+        val bodyWidth = arrowWidth * 0.35f
+        
+        // Arrow head (triangle pointing up)
+        path.moveTo(centerX, centerY - arrowHeight / 2f)
+        path.lineTo(centerX - arrowWidth / 2f, centerY - arrowHeight / 2f + headHeight)
+        path.lineTo(centerX - bodyWidth / 2f, centerY - arrowHeight / 2f + headHeight)
+        path.lineTo(centerX - bodyWidth / 2f, centerY + arrowHeight / 2f)
+        path.lineTo(centerX + bodyWidth / 2f, centerY + arrowHeight / 2f)
+        path.lineTo(centerX + bodyWidth / 2f, centerY - arrowHeight / 2f + headHeight)
+        path.lineTo(centerX + arrowWidth / 2f, centerY - arrowHeight / 2f + headHeight)
+        path.close()
+        
+        // Draw arrow fill - white
+        paint.style = android.graphics.Paint.Style.FILL
+        paint.color = Color.WHITE
+        canvas.drawPath(path, paint)
+        
+        // Arrow outline - subtle
+        paint.style = android.graphics.Paint.Style.STROKE
+        paint.strokeWidth = 2f
+        paint.color = Color.parseColor("#BBDEFB")
+        canvas.drawPath(path, paint)
+        
+        // Center dot
+        paint.style = android.graphics.Paint.Style.FILL
+        paint.color = Color.parseColor("#1976D2")
+        canvas.drawCircle(centerX, centerY, 4f, paint)
+        
+        // Small direction indicator at bottom
+        paint.color = Color.parseColor("#90CAF9")
+        canvas.drawCircle(centerX, centerY + arrowHeight / 2f + 8f, 3f, paint)
+        
+        return bitmap
+    }
+
+    private fun showBookmarkCollectionDialog(result: GeocodingResult) {
+        val bookmarkManager = BookmarkManager.getInstance(this)
+        val collections = bookmarkManager.getCollections()
+        
+        if (collections.isEmpty()) {
+            // Create default collection first
+            val defaultCollection = bookmarkManager.createCollection("Favorites")
+            saveBookmarkToCollection(result, defaultCollection.id)
+            return
+        }
+        
+        val items = collections.map { it.name }.toTypedArray()
+        val checkedItem = collections.indexOfFirst { it.id == "default" }
+        
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(R.string.save_to_collection)
+            .setSingleChoiceItems(items, checkedItem.coerceAtLeast(0)) { dialog, which ->
+                val selectedCollection = collections[which]
+                saveBookmarkToCollection(result, selectedCollection.id)
+                dialog.dismiss()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .setNeutralButton(R.string.new_collection) { _, _ ->
+                showCreateCollectionDialog(result)
+            }
+            .show()
+    }
+
+    private fun showCreateCollectionDialog(result: GeocodingResult) {
+        val input = android.widget.EditText(this).apply {
+            hint = getString(R.string.collection_name)
+            setPadding(40, 30, 40, 30)
+        }
+        
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(R.string.new_collection)
+            .setView(input)
+            .setPositiveButton(R.string.create_collection) { _, _ ->
+                val name = input.text.toString().trim()
+                if (name.isNotEmpty()) {
+                    val bookmarkManager = BookmarkManager.getInstance(this@MapScreen)
+                    val newCollection = bookmarkManager.createCollection(name)
+                    saveBookmarkToCollection(result, newCollection.id)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun saveBookmarkToCollection(result: GeocodingResult, collectionId: String) {
+        val bookmarkManager = BookmarkManager.getInstance(this)
+        val coordinate = result.coordinate
+        val bookmark = bookmarkManager.saveBookmark(
+            name = result.displayName.split(",").first(),
+            address = result.displayName,
+            latitude = coordinate.latitude,
+            longitude = coordinate.longitude,
+            collectionId = collectionId
+        )
+        if (bookmark != null) {
+            Toast.makeText(this, R.string.bookmark_saved, Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "Already saved in this collection", Toast.LENGTH_SHORT).show()
+        }
+        // Refresh the adapter to update bookmark icons
+        searchAdapter.notifyDataSetChanged()
+    }
+
+    private fun updateBookmarkIcon() {
+        destinationLocation?.let { coord ->
+            val bookmarkManager = BookmarkManager.getInstance(this)
+            val isBookmarked = bookmarkManager.getAllBookmarks().any { 
+                it.latitude == coord.latitude && 
+                it.longitude == coord.longitude 
+            }
+            btnBookmarkPlace.setImageResource(if (isBookmarked) R.drawable.ic_bookmark_filled else R.drawable.ic_bookmark_outline)
         }
     }
 
@@ -920,6 +1175,14 @@ class MapScreen : AppCompatActivity(), OnMapReadyCallback {
         }
 
         loadAndDisplayPotholes()
+        
+        // Handle pending bookmark intent
+        if (pendingBookmarkLat != 0.0 && pendingBookmarkLng != 0.0) {
+            animateToBookmark(pendingBookmarkLat, pendingBookmarkLng, pendingBookmarkName)
+            pendingBookmarkLat = 0.0
+            pendingBookmarkLng = 0.0
+            pendingBookmarkName = ""
+        }
     }
 
     private fun loadAndDisplayPotholes() {
